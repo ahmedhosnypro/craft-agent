@@ -5,6 +5,9 @@
 !.env.sample
 !.env.template
 /scratch
+/analysis
+/PLAN.md
 progress.db
 progress.db-wal
 progress.db-shm
+/scripts/progress-db.sql

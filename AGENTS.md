@@ -76,10 +76,11 @@ are touching.
 The product never mentions the agent harnesses or reference actions it was
 studied against — in code, comments, docs, commit messages, or anywhere
 else. The enforced identifier and host-literal list lives in
-`scripts/identifier-scan.sh`; the scan fails the build on any hit. The
-research trail lives in `analysis/`, `PLAN.md`, and
-`scripts/progress-db.sql` — the research record — which the scan skips by
-design.
+`scripts/identifier-scan.sh`; the scan fails the build on any hit and covers
+the whole tracked tree. The research trail (`analysis/`, `PLAN.md`,
+`progress.db`, `scripts/progress-db.sql`) is the local-only record: those
+paths are gitignored and never leave this machine, so the repository carries
+no lineage traces at all.
 
 ## 6. Live corpora skip, never fail
 
