@@ -1,0 +1,14 @@
+# Deliberate violations — the identifier-scan selftest fixture. Every line
+# names a banned token on purpose. Normal mode never scans this file; the
+# selftest asserts each category fires on its labeled line.
+id-kimi: harness identifier kimi
+id-grok: harness identifier grok
+id-xai: harness identifier xai
+id-deepseek: harness identifier deepseek
+id-dsh: harness identifier dsh
+action-claude-code-action: reference action claude-code-action
+action-claude-code-base-action: reference action claude-code-base-action
+action-codex-action: reference action codex-action
+host-anthropic: api.anthropic.com
+host-openai: api.openai.com
+host-gemini: generativelanguage.googleapis.com

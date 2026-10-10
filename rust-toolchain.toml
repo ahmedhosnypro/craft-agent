@@ -1,0 +1,4 @@
+# Rustup provisions this pin automatically; a system toolchain ignores the file.
+[toolchain]
+channel = "1.98.1"
+components = ["rustfmt", "clippy"]
