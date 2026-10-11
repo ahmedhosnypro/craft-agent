@@ -1,0 +1,180 @@
+# craft-agent as a composite Action: download the release binary for the
+# runner triple, verify it against the release checksums, then run one
+# mission (run or digest). Inputs reach the run scripts through env only —
+# never through expression interpolation inside the scripts.
+name: craft-agent
+description: BYOK agentic AI agent for the storytold suite — one bounded agent turn over a prompt, or the daily suite digest.
+author: storytold
+
+inputs:
+  mission:
+    description: The craft-agent command to run — run or digest.
+    required: false
+    default: run
+  provider:
+    description: Provider id — anthropic, openai, or gemini.
+    required: true
+  model:
+    description: Model id requested from the provider.
+    required: true
+  args:
+    description: Extra arguments for the mission command, space separated.
+    required: false
+    default: ""
+  max-turns:
+    description: Agent turn cap.
+    required: false
+    default: "40"
+  max-tokens:
+    description: Total token budget cap.
+    required: false
+    default: "4000000"
+  prompt:
+    description: Prompt text for the run mission; written to a file before the run.
+    required: false
+    default: ""
+  github-token:
+    description: Token the gh tool uses, exported as GH_TOKEN.
+    required: false
+    default: ${{ github.token }}
+  version:
+    description: Release tag the binary is downloaded from.
+    required: false
+    default: v1
+  release-repository:
+    description: Repository that hosts the release assets.
+    required: false
+    default: storytold/craft-agent
+
+outputs:
+  digest-path:
+    description: Digest markdown path (digest mission, successful runs).
+    value: ${{ steps.agent.outputs.digest-path }}
+  final-message:
+    description: Terminal detail from the run_finished stream-json event.
+    value: ${{ steps.agent.outputs.final-message }}
+  conclusion:
+    description: success, error, max-turns, budget, or denied.
+    value: ${{ steps.agent.outputs.conclusion }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install the release binary
+      id: install
+      shell: bash
+      env:
+        CRAFT_AGENT_VERSION: ${{ inputs.version }}
+        CRAFT_AGENT_RELEASE_REPOSITORY: ${{ inputs.release-repository }}
+      run: |
+        set -euo pipefail
+        case "${RUNNER_OS}:${RUNNER_ARCH}" in
+          Linux:X64) triple="x86_64-unknown-linux-musl" ;;
+          Linux:ARM64) triple="aarch64-unknown-linux-musl" ;;
+          *)
+            echo "::error::unsupported runner ${RUNNER_OS}/${RUNNER_ARCH} — the release ships Linux x86_64 and aarch64 binaries"
+            exit 1
+            ;;
+        esac
+        asset="craft-agent-${triple}"
+        base="https://github.com/${CRAFT_AGENT_RELEASE_REPOSITORY}/releases/download/${CRAFT_AGENT_VERSION}"
+        dir="${RUNNER_TEMP}/craft-agent-download"
+        rm -rf "$dir"
+        mkdir -p "$dir"
+        curl -fsSL -o "${dir}/checksums.txt" "${base}/checksums.txt"
+        recorded="$(awk -v asset="$asset" '$2 == asset || $2 ~ ("/" asset "$") { print $2; exit }' "${dir}/checksums.txt")"
+        if [ -z "$recorded" ]; then
+          echo "::error::no checksums.txt entry for ${asset} in release ${CRAFT_AGENT_VERSION}"
+          exit 1
+        fi
+        mkdir -p "${dir}/$(dirname "$recorded")"
+        curl -fsSL -o "${dir}/${recorded}" "${base}/${asset}"
+        (
+          cd "$dir"
+          sha256sum --check checksums.txt --ignore-missing
+        )
+        bindir="${RUNNER_TEMP}/craft-agent-bin"
+        mkdir -p "$bindir"
+        install -m 0755 "${dir}/${recorded}" "${bindir}/craft-agent"
+        echo "$bindir" >> "$GITHUB_PATH"
+
+    - name: Run the mission
+      id: agent
+      shell: bash
+      env:
+        CRAFT_AGENT_MISSION: ${{ inputs.mission }}
+        CRAFT_AGENT_PROVIDER: ${{ inputs.provider }}
+        CRAFT_AGENT_MODEL: ${{ inputs.model }}
+        CRAFT_AGENT_ARGS: ${{ inputs.args }}
+        CRAFT_AGENT_MAX_TURNS: ${{ inputs.max-turns }}
+        CRAFT_AGENT_MAX_TOKENS: ${{ inputs.max-tokens }}
+        CRAFT_AGENT_PROMPT: ${{ inputs.prompt }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        mission="${CRAFT_AGENT_MISSION:-run}"
+        case "$mission" in
+          run | digest) ;;
+          *)
+            echo "::error::unknown mission '${mission}' — expected run or digest"
+            exit 1
+            ;;
+        esac
+        if [ "$mission" = "run" ] && [ -z "$CRAFT_AGENT_PROMPT" ]; then
+          echo "::error::the prompt input is required for the run mission"
+          exit 1
+        fi
+        prompt_file=""
+        if [ "$mission" = "run" ]; then
+          prompt_file="${RUNNER_TEMP}/craft-agent-prompt.txt"
+          printf '%s' "$CRAFT_AGENT_PROMPT" > "$prompt_file"
+        fi
+        cmd=(craft-agent "$mission" --max-turns "$CRAFT_AGENT_MAX_TURNS"
+          --max-tokens "$CRAFT_AGENT_MAX_TOKENS")
+        if [ "$mission" = "run" ]; then
+          cmd+=(--output-format stream-json)
+        fi
+        if [ -n "$prompt_file" ]; then
+          cmd+=(--prompt "$prompt_file")
+        fi
+        if [ -n "$CRAFT_AGENT_ARGS" ]; then
+          read -ra extra_args <<< "$CRAFT_AGENT_ARGS"
+          cmd+=("${extra_args[@]}")
+        fi
+        stream="${RUNNER_TEMP}/craft-agent-stream.jsonl"
+        set +e
+        "${cmd[@]}" > "$stream"
+        rc=$?
+        set -e
+        case "$rc" in
+          0) conclusion="success" ;;
+          2) conclusion="max-turns" ;;
+          3) conclusion="budget" ;;
+          4) conclusion="denied" ;;
+          *) conclusion="error" ;;
+        esac
+        final_message="$(tail -n 1 "$stream" | jq -r 'select(.type == "run_finished") | .detail // ""' 2>/dev/null || true)"
+        : "${final_message:=}"
+        digest_path=""
+        if [ "$mission" = "digest" ] && [ "$conclusion" = "success" ]; then
+          candidate="${GITHUB_WORKSPACE}/out/digest.md"
+          if [ -f "$candidate" ]; then
+            digest_path="$candidate"
+          else
+            echo "::warning::digest exited 0 but produced no ${candidate}"
+            conclusion="error"
+          fi
+        fi
+        {
+          echo "conclusion=${conclusion}" >> "$GITHUB_OUTPUT"
+          echo "digest-path=${digest_path}" >> "$GITHUB_OUTPUT"
+          echo "final-message<<CRAFT_AGENT_EOF" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$final_message" >> "$GITHUB_OUTPUT"
+          echo "CRAFT_AGENT_EOF" >> "$GITHUB_OUTPUT"
+        }
+        if [ "$rc" -ne 0 ]; then
+          echo "--- craft-agent exit code ${rc}; last stream events: ---"
+          tail -n 5 "$stream" || true
+          echo "---"
+        fi
+        exit "$rc"

@@ -12,8 +12,9 @@ work: do not ship a feature by adding a panic path.
 
 1. **Fail with `Result<T, E>`.** Return the crate's error type and
    propagate with `?`; add context (`map_err`, an error variant) instead of
-   discarding it. Exit codes are 0/1; every failure prints one actionable
-   line.
+   discarding it. Exit codes are typed: 0 completed, 1 error, 2 max-turns
+   or stationarity, 3 budget, 4 sensitive-path denial; every failure
+   prints one actionable line.
 2. **No panicking shortcuts outside tests:** no `unwrap()`, `expect()`,
    `panic!`, `unreachable!`, `todo()` or `unimplemented!`. Use `?`,
    `ok_or(..)?`, `let Some(x) = .. else { return Err(..) }`, `if let`, or a
@@ -53,15 +54,22 @@ other agents can consume a run.
 - `cargo fmt --all --check`
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `cargo test --workspace`
-- `./scripts/scan-secrets.sh` (secret patterns + the tracked-`.env` rule)
-- `./scripts/identifier-scan.sh` (the no-lineage gate)
+- `./scripts/scan-secrets.sh` and `--selftest` (secret patterns + the
+  tracked-`.env` rule)
+- `./scripts/identifier-scan.sh` and `--selftest` (the no-lineage gate)
+- `./scripts/check-file-length.sh` (≤300 effective lines per Rust file,
+  tests included, no exemptions)
+- `cargo deny --locked check` (licences, advisories, sources)
+- `cargo machete` (zero unused dependencies)
+- `cargo build --locked`
 
 `just check` is mirrored EXACTLY by `.github/workflows/ci.yml` (lockstep
 law): every gate change lands in both in the same commit. Both scanners
 fail closed — a scan that cannot run is a red gate, never a silent pass —
-and both carry a `--selftest` canary mode proving they catch what they
-claim. Files stay under 300 effective lines and functions under 75
-(`clippy.toml`).
+and both carry a `--selftest` canary mode proving them in both
+directions: every banned pattern fires, and legal strings never trip.
+Rust files stay under 300 effective lines (`check-file-length.sh`) and
+functions under 75 (`clippy.toml`).
 
 ## 4. Comments: terse and timeless
 

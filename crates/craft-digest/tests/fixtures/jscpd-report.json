@@ -1,0 +1,147 @@
+{
+  "duplicates": [
+    {
+      "firstFile": {
+        "end": 17,
+        "endLoc": {
+          "column": 2,
+          "line": 17,
+          "position": 391
+        },
+        "name": "app-a/src/lib.rs",
+        "start": 3,
+        "startLoc": {
+          "column": 0,
+          "line": 3,
+          "position": 31
+        }
+      },
+      "format": "rust",
+      "fragment": "fn shared_widget(kind: &str, count: usize) -> Vec<String> {\n    let mut out: Vec<String> = Vec::new();\n    for i in 0..count {\n        let label = format!(\"{}-{}\", kind, i);\n        let upper = label.to_uppercase();\n        if upper.len() > 3 && !upper.contains('X') {\n            out.push(upper);\n        }\n    }\n    out.sort();\n    out.dedup();\n    out\n}\n\nfn render_panel(title: &str, rows: &[String]) -> String {",
+      "isNew": false,
+      "kind": "exact",
+      "lines": 15,
+      "secondFile": {
+        "end": 16,
+        "endLoc": {
+          "column": 2,
+          "line": 16,
+          "position": 369
+        },
+        "name": "app-b/src/lib.rs",
+        "start": 2,
+        "startLoc": {
+          "column": 0,
+          "line": 2,
+          "position": 9
+        }
+      },
+      "tokens": 105
+    },
+    {
+      "firstFile": {
+        "end": 27,
+        "endLoc": {
+          "column": 1,
+          "line": 27,
+          "position": 639
+        },
+        "name": "app-a/src/lib.rs",
+        "start": 17,
+        "startLoc": {
+          "column": 0,
+          "line": 17,
+          "position": 389
+        }
+      },
+      "format": "rust",
+      "fragment": "fn render_panel(title: &str, rows: &[String]) -> String {\n    let mut buf = String::new();\n    buf.push_str(\"== \");\n    buf.push_str(title);\n    buf.push_str(\" ==\");\n    for r in rows {\n        buf.push('\\n');\n        buf.push_str(r);\n    }\n    buf\n}",
+      "isNew": false,
+      "kind": "exact",
+      "lines": 11,
+      "secondFile": {
+        "end": 14,
+        "endLoc": {
+          "column": 1,
+          "line": 14,
+          "position": 275
+        },
+        "name": "app-c/src/lib.rs",
+        "start": 4,
+        "startLoc": {
+          "column": 0,
+          "line": 4,
+          "position": 25
+        }
+      },
+      "tokens": 73
+    },
+    {
+      "firstFile": {
+        "end": 30,
+        "endLoc": {
+          "column": 1,
+          "line": 30,
+          "position": 666
+        },
+        "name": "app-b/src/lib.rs",
+        "start": 14,
+        "startLoc": {
+          "column": 0,
+          "line": 14,
+          "position": 364
+        }
+      },
+      "format": "rust",
+      "fragment": "}\n\nfn clamp_low(v: i64, lo: i64, hi: i64, label: &str) -> i64 {\n    let clamped = if v < lo {\n        lo\n    } else if v > hi {\n        hi\n    } else {\n        v\n    };\n    let note = format!(\"{} -> {}\", label, clamped);\n    if note.len() > 12 {\n        clamped\n    } else {\n        clamped + 1\n    }\n}",
+      "isNew": false,
+      "kind": "exact",
+      "lines": 17,
+      "secondFile": {
+        "end": 30,
+        "endLoc": {
+          "column": 1,
+          "line": 30,
+          "position": 576
+        },
+        "name": "app-c/src/lib.rs",
+        "start": 14,
+        "startLoc": {
+          "column": 0,
+          "line": 14,
+          "position": 274
+        }
+      },
+      "tokens": 79
+    }
+  ],
+  "statistics": {
+    "detectionDate": "2026-10-11T07:21:35.699Z",
+    "formats": {
+      "rust": {
+        "clones": 3,
+        "duplicatedLines": 43,
+        "duplicatedTokens": 257,
+        "lines": 87,
+        "newClones": 0,
+        "newDuplicatedLines": 0,
+        "percentage": 49.42528735632184,
+        "percentageTokens": 49.8062015503876,
+        "sources": 3,
+        "tokens": 516
+      }
+    },
+    "total": {
+      "clones": 3,
+      "duplicatedLines": 43,
+      "duplicatedTokens": 257,
+      "lines": 87,
+      "newClones": 0,
+      "newDuplicatedLines": 0,
+      "percentage": 49.42528735632184,
+      "percentageTokens": 49.8062015503876,
+      "sources": 3,
+      "tokens": 516
+    }
+  }
+}

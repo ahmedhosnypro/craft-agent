@@ -1,0 +1,43 @@
+# cargo-deny — the supply-chain gate: licenses, RustSec advisories,
+# duplicate crates, and registry sources. Docs: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+all-features = false
+
+[advisories]
+# A crate version its publisher pulled from crates.io — routinely for
+# security or supply-chain reasons — is a gate failure, not a log line.
+yanked = "deny"
+# An unmaintained or unsound dependency in the supply chain is a finding,
+# not a warning. If one ever legitimately blocks the gate, ignore that
+# single advisory id with a reason rather than lowering the level.
+unmaintained = "all"
+unsound = "all"
+
+[licenses]
+confidence-threshold = 0.8
+# Permissive licences only (the org law); MPL-2.0 is permitted unmodified.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "Unicode-3.0",
+  "CC0-1.0",
+  "BSL-1.0",
+  "MPL-2.0",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+# Every crate in the lockfile must come from crates.io; an unknown
+# registry or git source fails the gate rather than warning.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

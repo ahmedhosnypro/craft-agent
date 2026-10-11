@@ -1,0 +1,29 @@
+# The repos the daily digest covers, one per line; the org comes from the
+# digest command's --org flag. Curated by hand so archived and legacy
+# repositories stay out. Blank lines and lines starting with # are ignored.
+
+# Applications, highest-traffic first.
+photocraft
+artcraft
+lightcraft
+filmcraft
+pdfcraft
+vectorcraft
+effectcraft
+wordcraft
+designcraft
+gridcraft
+cadcraft
+soundcraft
+deckcraft
+craft-launcher
+
+# Shared infrastructure and tooling.
+artcraft-services
+artcraftx
+craft-fonts
+photocraft-corpus
+craft-repo-status-app
+craft-libs
+cloud-worker
+github-media

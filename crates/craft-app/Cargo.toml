@@ -8,6 +8,10 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[lib]
+name = "craft_app"
+path = "src/lib.rs"
+
 [[bin]]
 name = "craft-agent"
 path = "src/main.rs"
@@ -15,3 +19,10 @@ path = "src/main.rs"
 [dependencies]
 clap.workspace = true
 thiserror.workspace = true
+craft-core = { path = "../craft-core", version = "0.1.0" }
+craft-digest = { path = "../craft-digest", version = "0.1.0" }
+craft-providers = { path = "../craft-providers", version = "0.1.0" }
+craft-runtime = { path = "../craft-runtime", version = "0.1.0" }
+craft-tools = { path = "../craft-tools", version = "0.1.0" }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "time"] }

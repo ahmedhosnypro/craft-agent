@@ -1,6 +1,110 @@
 //! Live tool round-trip corpus for the provider seam, driven by the
 //! repo-root `.env` (`TEST_BYOK_*`); runs via `just integration_tools`.
 
-#[test]
+#[path = "byok_env.rs"]
+mod byok_env;
+
+use std::error::Error;
+use std::time::Duration;
+
+use craft_core::events::{FoldedTurn, TurnCaps, TurnFold};
+use craft_core::provider::Provider;
+use craft_core::types::{ChatMessage, ModelRequest, ToolSpec};
+use craft_providers::openai::OpenAiProvider;
+use futures::StreamExt;
+
+type TestError = Box<dyn Error + Send + Sync>;
+
+// Bounds every live turn; a stalled gateway is a broken corpus, not a hang.
+const LIVE_BOUND: Duration = Duration::from_secs(120);
+
+// Streams one turn end to end, folding events as they arrive.
+async fn live_turn(
+    provider: &OpenAiProvider,
+    request: ModelRequest,
+) -> Result<FoldedTurn, TestError> {
+    let mut stream = provider.stream(request).await?;
+    let mut fold = TurnFold::new(TurnCaps::default());
+    while let Some(item) = stream.next().await {
+        let event = item?;
+        fold.push(event)?;
+    }
+    Ok(fold.finish()?)
+}
+
+fn weather_tool() -> ToolSpec {
+    ToolSpec {
+        name: String::from("get_weather"),
+        description: String::from("Current weather for a city."),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"],
+        }),
+    }
+}
+
+#[tokio::test]
 #[ignore = "live corpus: requires TEST_BYOK_* in .env"]
-fn integration_tools() {}
+async fn integration_tools() -> Result<(), TestError> {
+    let keys = crate::require_keys!("tool round-trip");
+    let provider = OpenAiProvider::new(&keys.base_url, &keys.model, &keys.api_key)?;
+    let system = String::from(
+        "You are a weather agent. Call get_weather for weather questions; after its result, answer in one short sentence.",
+    );
+    let ask = String::from("What is the weather in Cairo? Use the tool.");
+    let tools = vec![weather_tool()];
+    let request = ModelRequest {
+        system: Some(system.clone()),
+        messages: vec![ChatMessage::User { text: ask.clone() }],
+        tools: tools.clone(),
+        max_tokens: 1024,
+    };
+    let first = tokio::time::timeout(LIVE_BOUND, live_turn(&provider, request))
+        .await
+        .map_err(|_| String::from("the tool-call turn exceeded the 120s bound"))??;
+
+    let call = first
+        .tool_calls
+        .first()
+        .ok_or_else(|| String::from("the declared tool must be called"))?;
+    assert_eq!(call.name, "get_weather", "the declared tool must be called");
+    assert!(
+        !call.id.is_empty(),
+        "the tool call must carry the provider id"
+    );
+
+    let request = ModelRequest {
+        system: Some(system),
+        messages: vec![
+            ChatMessage::User { text: ask },
+            ChatMessage::Assistant {
+                text: first.text.clone(),
+                tool_calls: first.tool_calls.clone(),
+                native_blocks: None,
+            },
+            ChatMessage::Tool {
+                call_id: call.id.clone(),
+                content: String::from(
+                    "{\"city\": \"Cairo\", \"temp_c\": 21, \"condition\": \"clear\"}",
+                ),
+                is_error: false,
+            },
+        ],
+        tools,
+        max_tokens: 1024,
+    };
+    let second = tokio::time::timeout(LIVE_BOUND, live_turn(&provider, request))
+        .await
+        .map_err(|_| String::from("the tool-result turn exceeded the 120s bound"))??;
+
+    assert!(
+        !second.text.trim().is_empty(),
+        "the model must finish with an answer after the tool result"
+    );
+    assert!(
+        second.tool_calls.is_empty(),
+        "the model must finish instead of re-calling the tool"
+    );
+    Ok(())
+}

@@ -1,0 +1,76 @@
+# The live corpora against the BYOK test gateway. Dispatch-only by
+# design — never pull_request and never pull_request_target, so the key
+# never enters a fork-controlled context. The gateway endpoint comes
+# from secrets, never from repository content, and an empty secret is a
+# hard failure (unlike local runs, which SKIP when .env is absent).
+name: integration-live
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-live
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+      - name: Preflight the gateway secrets
+        env:
+          TEST_BYOK_BASE_URL: ${{ secrets.TEST_BYOK_BASE_URL }}
+          TEST_BYOK_API_KEY: ${{ secrets.TEST_BYOK_API_KEY }}
+          TEST_BYOK_MODEL: ${{ secrets.TEST_BYOK_MODEL }}
+        run: |
+          set -euo pipefail
+          status=0
+          for knob in TEST_BYOK_BASE_URL TEST_BYOK_API_KEY TEST_BYOK_MODEL; do
+            if [ -z "${!knob}" ]; then
+              echo "::error::the ${knob} secret is empty — configure it in the repository secrets before dispatching this workflow"
+              status=1
+            fi
+          done
+          exit "$status"
+      - name: integration — completions round trip
+        env:
+          TEST_BYOK_BASE_URL: ${{ secrets.TEST_BYOK_BASE_URL }}
+          TEST_BYOK_API_KEY: ${{ secrets.TEST_BYOK_API_KEY }}
+          TEST_BYOK_MODEL: ${{ secrets.TEST_BYOK_MODEL }}
+        run: cargo test -p craft-providers --test integration -- --ignored --nocapture
+      - name: integration_tools — tool round trip
+        env:
+          TEST_BYOK_BASE_URL: ${{ secrets.TEST_BYOK_BASE_URL }}
+          TEST_BYOK_API_KEY: ${{ secrets.TEST_BYOK_API_KEY }}
+          TEST_BYOK_MODEL: ${{ secrets.TEST_BYOK_MODEL }}
+        run: cargo test -p craft-providers --test integration_tools -- --ignored --nocapture
+      - name: integration_stream_tools — streamed tool deltas
+        env:
+          TEST_BYOK_BASE_URL: ${{ secrets.TEST_BYOK_BASE_URL }}
+          TEST_BYOK_API_KEY: ${{ secrets.TEST_BYOK_API_KEY }}
+          TEST_BYOK_MODEL: ${{ secrets.TEST_BYOK_MODEL }}
+        run: cargo test -p craft-providers --test integration_stream_tools -- --ignored --nocapture
+      - name: integration_auth — bad key, typed error
+        env:
+          TEST_BYOK_BASE_URL: ${{ secrets.TEST_BYOK_BASE_URL }}
+          TEST_BYOK_API_KEY: ${{ secrets.TEST_BYOK_API_KEY }}
+          TEST_BYOK_MODEL: ${{ secrets.TEST_BYOK_MODEL }}
+        run: cargo test -p craft-providers --test integration_auth -- --ignored --nocapture
+      - name: integration_dialect_mount — messages dialect over the same lane
+        env:
+          TEST_BYOK_BASE_URL: ${{ secrets.TEST_BYOK_BASE_URL }}
+          TEST_BYOK_API_KEY: ${{ secrets.TEST_BYOK_API_KEY }}
+          TEST_BYOK_MODEL: ${{ secrets.TEST_BYOK_MODEL }}
+        run: cargo test -p craft-providers --test integration_dialect_mount -- --ignored --nocapture
+      - name: integration_agent_loop — full agent loop
+        env:
+          TEST_BYOK_BASE_URL: ${{ secrets.TEST_BYOK_BASE_URL }}
+          TEST_BYOK_API_KEY: ${{ secrets.TEST_BYOK_API_KEY }}
+          TEST_BYOK_MODEL: ${{ secrets.TEST_BYOK_MODEL }}
+        run: cargo test -p craft-runtime --test integration_agent_loop -- --ignored --nocapture

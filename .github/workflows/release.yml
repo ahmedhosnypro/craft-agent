@@ -1,0 +1,133 @@
+# The release pipeline. A pushed semver tag (or a dispatch naming an
+# existing one) builds the Linux binaries natively, one runner per
+# arch; a single release job assembles dist/, publishes draft-first so
+# a failed run never leaves a partial release, then repoints the moving
+# v1 tag at the release commit.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release (e.g. v1.2.3)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    if: ${{ github.event_name == 'workflow_dispatch' || github.ref_name != 'v1' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+    env:
+      TARGET: ${{ matrix.target }}
+    steps:
+      - name: Checkout the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 1
+      - name: Ensure the musl target
+        run: |
+          set -euo pipefail
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+            export PATH="${HOME}/.cargo/bin:${PATH}"
+            echo "${HOME}/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+          rustup target add "$TARGET"
+      - name: Build
+        run: cargo build --release --locked -p craft-app --target "$TARGET"
+      - name: Stage dist
+        run: |
+          set -euo pipefail
+          install -m 0755 "target/${TARGET}/release/craft-agent" "dist/craft-agent-${TARGET}"
+      - name: Upload the binary
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: craft-agent-${{ matrix.target }}
+          path: dist/craft-agent-${{ matrix.target }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: Mint the release token
+        id: release-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.CRAFT_AGENT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CRAFT_AGENT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+      - name: Checkout the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 1
+          token: ${{ steps.release-token.outputs.token }}
+      - name: Download the binaries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: craft-agent-*
+          path: dist
+          merge-multiple: true
+      - name: Verify the asset set
+        run: |
+          set -euo pipefail
+          test -s dist/craft-agent-x86_64-unknown-linux-musl
+          test -s dist/craft-agent-aarch64-unknown-linux-musl
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum craft-agent-x86_64-unknown-linux-musl \
+                     craft-agent-aarch64-unknown-linux-musl > checksums.txt
+          sha256sum --check checksums.txt --ignore-missing
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --draft --verify-tag \
+              --title "craft-agent $TAG" --generate-notes
+          fi
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" \
+            dist/craft-agent-x86_64-unknown-linux-musl \
+            dist/craft-agent-aarch64-unknown-linux-musl \
+            dist/checksums.txt --clobber
+          gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --draft=false
+      - name: Move the v1 tag
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            *-*) echo "pre-release tag ${TAG} — v1 left untouched" ;;
+            *)
+              git tag -f v1 "$(git rev-parse HEAD)"
+              git push -f origin v1
+              ;;
+          esac

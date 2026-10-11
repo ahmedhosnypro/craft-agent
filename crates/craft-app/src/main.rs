@@ -1,48 +1,22 @@
 //! craft-agent: the BYOK agentic AI agent for the storytold suite.
 
-use clap::{Parser, Subcommand};
-
-#[derive(Parser)]
-#[command(
-    name = "craft-agent",
-    version,
-    about = "BYOK agentic AI agent for the storytold suite"
-)]
-struct Cli {
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Subcommand)]
-enum Command {
-    /// Run the agent over a prompt.
-    Run,
-    /// Produce the storytold suite digest.
-    Digest,
-}
-
-#[derive(Debug, thiserror::Error)]
-enum AppError {
-    #[error("the `{command}` command is not implemented yet")]
-    Unsupported { command: &'static str },
-}
-
-fn run_agent() -> Result<(), AppError> {
-    Err(AppError::Unsupported { command: "run" })
-}
-
-fn run_digest() -> Result<(), AppError> {
-    Err(AppError::Unsupported { command: "digest" })
-}
+use craft_app::cli::{CliCommand, parse_cli};
+use craft_app::{digest_cmd, run_cmd};
 
 fn main() {
-    let cli = Cli::parse();
-    let outcome = match cli.command {
-        Command::Run => run_agent(),
-        Command::Digest => run_digest(),
+    let cli = match parse_cli(std::env::args_os()) {
+        Ok(cli) => cli,
+        Err(err) => err.exit(),
     };
-    if let Err(error) = outcome {
-        eprintln!("craft-agent: {error}");
-        std::process::exit(1);
+    let outcome = match cli.command {
+        CliCommand::Run(run) => run_cmd::execute_run(run),
+        CliCommand::Digest(digest) => digest_cmd::execute_digest(digest),
+    };
+    match outcome {
+        Ok(code) => std::process::exit(code),
+        Err(error) => {
+            eprintln!("craft-agent: {error}");
+            std::process::exit(1);
+        }
     }
 }

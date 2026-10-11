@@ -1,0 +1,107 @@
+# In-repo smoke for the composite action: manual dispatch only, keyless by
+# design — asserts typed fail-closed behavior, never model success.
+name: smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release tag the smoke downloads the binary from.
+        required: false
+        type: string
+        default: v1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      # The action leg: no provider configured, so the run mission must
+      # stop at the typed env error. continue-on-error lets the next
+      # step turn that failure into the assertion.
+      - name: Run the action with no provider
+        id: keyless_run
+        uses: ./
+        with:
+          mission: run
+          version: ${{ inputs.version }}
+          release-repository: ${{ github.repository }}
+          provider: ""
+          model: ""
+          prompt: Smoke probe — no provider is configured, so the mission must fail closed.
+          args: --idle-timeout-secs 30
+        continue-on-error: true
+
+      - name: Assert the keyless run failed typed
+        run: |
+          set -euo pipefail
+          test "${{ steps.keyless_run.outcome }}" = "failure"
+          test "${{ steps.keyless_run.outputs.conclusion }}" = "error"
+
+      - name: Binary sanity — help and version
+        run: |
+          set -euo pipefail
+          craft-agent --help
+          craft-agent --version
+
+      # Direct probes of the downloaded binary: the exact typed error
+      # line and exit code, with the provider env provably absent.
+      - name: Probe the no-provider error
+        run: |
+          set -euo pipefail
+          set +e
+          env -u CRAFT_AGENT_PROVIDER -u CRAFT_AGENT_MODEL \
+            craft-agent run --prompt - --output-format stream-json \
+            </dev/null >"$RUNNER_TEMP/probe-no-provider.jsonl" \
+            2>"$RUNNER_TEMP/probe-no-provider.err"
+          rc=$?
+          set -e
+          test "$rc" -eq 1
+          grep -qF "CRAFT_AGENT_PROVIDER is required but not set" \
+            "$RUNNER_TEMP/probe-no-provider.err"
+
+      - name: Probe the missing-key error (digest dry run)
+        run: |
+          set -euo pipefail
+          set +e
+          env -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u GOOGLE_API_KEY \
+            CRAFT_AGENT_PROVIDER=openai CRAFT_AGENT_MODEL=gpt-4o-mini \
+            craft-agent digest --dry-run \
+            >"$RUNNER_TEMP/probe-digest.jsonl" 2>"$RUNNER_TEMP/probe-digest.err"
+          rc=$?
+          set -e
+          test "$rc" -eq 1
+          grep -qF "OPENAI_API_KEY is required but not set" \
+            "$RUNNER_TEMP/probe-digest.err"
+
+      # The digest mission through the action: provider set, key
+      # absent — the preflight must stop at the same typed env error.
+      - name: Digest dry run through the action
+        id: keyless_digest
+        uses: ./
+        with:
+          mission: digest
+          version: ${{ inputs.version }}
+          release-repository: ${{ github.repository }}
+          provider: openai
+          model: gpt-4o-mini
+          args: --dry-run --idle-timeout-secs 30
+        continue-on-error: true
+
+      - name: Assert the keyless digest failed typed
+        run: |
+          set -euo pipefail
+          test "${{ steps.keyless_digest.outcome }}" = "failure"
+          test "${{ steps.keyless_digest.outputs.conclusion }}" = "error"

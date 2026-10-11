@@ -1,14 +1,31 @@
-# Deliberate violations — the identifier-scan selftest fixture. Every line
-# names a banned token on purpose. Normal mode never scans this file; the
-# selftest asserts each category fires on its labeled line.
-id-kimi: harness identifier kimi
-id-grok: harness identifier grok
-id-xai: harness identifier xai
-id-deepseek: harness identifier deepseek
-id-dsh: harness identifier dsh
-action-claude-code-action: reference action claude-code-action
-action-claude-code-base-action: reference action claude-code-base-action
-action-codex-action: reference action codex-action
-host-anthropic: api.anthropic.com
-host-openai: api.openai.com
-host-gemini: generativelanguage.googleapis.com
+# The identifier-scan selftest fixture. ban-* lines must FAIL the scan;
+# legal-* lines must PASS. The normal tree scan never reads this file; the
+# selftest asserts every banned pattern fires on its ban line and that no
+# line other than a ban-* line ever trips a pattern.
+ban-kimi-code: kimi-code
+ban-grok-build: grok-build
+ban-deepseek-harness: deepseek-harness
+ban-xai: xai
+ban-dsh: dsh
+ban-claude-code: claude-code
+ban-codex-action: codex-action
+ban-claude-code-action: claude-code-action
+ban-host-api.x.ai: api.x.ai
+ban-host-api.moonshot.ai: api.moonshot.ai
+ban-host-api.moonshot.cn: api.moonshot.cn
+legal-model-claude: claude-sonnet-5-5
+legal-model-codex: gpt-5.5-codex
+legal-model-kimi: kimi-k2.5
+legal-model-deepseek: deepseek-chat
+legal-bare-claude: claude
+legal-bare-codex: codex
+legal-bare-kimi: kimi
+legal-bare-grok: grok
+legal-bare-deepseek: deepseek
+legal-env-openai: OPENAI_API_KEY
+legal-env-anthropic: ANTHROPIC_API_KEY
+legal-env-google: GOOGLE_API_KEY
+legal-env-byok: TEST_BYOK_BASE_URL TEST_BYOK_API_KEY TEST_BYOK_MODEL TEST_BYOK_VISION_MODEL
+legal-host-anthropic: api.anthropic.com
+legal-host-openai: api.openai.com
+legal-host-gemini: generativelanguage.googleapis.com

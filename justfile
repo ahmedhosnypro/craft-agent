@@ -9,13 +9,20 @@ export CARGO_INCREMENTAL := "0"
 default:
     @just --list
 
-# Full quality gate: fmt + clippy + tests + secrets scan + identifier scan.
+# Full quality gate: fmt + clippy + tests + both scanners (with
+# selftests) + file length + cargo deny + cargo machete + build --locked.
 check:
     cargo fmt --all --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo test --workspace
     ./scripts/scan-secrets.sh
+    ./scripts/scan-secrets.sh --selftest
     ./scripts/identifier-scan.sh
+    ./scripts/identifier-scan.sh --selftest
+    ./scripts/check-file-length.sh
+    cargo deny --locked check
+    cargo machete
+    cargo build --locked
 
 # Live corpora: driven by the repo-root `.env` (TEST_BYOK_*); each recipe
 # runs its `#[ignore]`d tests. When any knob is missing or empty the corpus

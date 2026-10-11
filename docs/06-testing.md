@@ -1,19 +1,121 @@
 # 06 — Testing
 
-Two corpus tiers:
+Two corpus tiers, one gate. Keyless fixture corpora run in every gate and
+in every CI run — no credentials, no network, deterministic. Live corpora
+talk to a real endpoint through the repo-root `.env` and SKIP — never
+fail — when that file is absent, so CI stays green without credentials and
+the same corpora pass for real wherever a `.env` exists. Tests are authored
+RED first: a feature without its corpus is not a feature.
 
-- **Keyless corpora** always run in every gate and in CI: recorded
-  request/SSE fixtures per adapter (request encoding, SSE decode,
-  tool-call mapping, finish reasons, usage accounting, hostile inputs) and
-  the runtime/tool corpora (progress-to-terminal semantics,
-  sensitive-file guards, timeout and kill sequencing, budget stops). Every
-  feature lands with its corpus authored RED first.
-- **Live corpora** talk to a real endpoint via the repo-root `.env`
-  (`TEST_BYOK_*` knobs — see `.env.example`); every live test is
-  `#[ignore]`d and runs through its `just integration*` recipe. Without
-  `.env` each one prints its SKIP reason and passes — never fails — so CI
-  stays green.
+## Keyless corpora
 
-The gate: `just check` (fmt, clippy, tests, secrets scan, identifier
-scan), mirrored exactly by CI. Both scanners carry `--selftest` canary
-modes and fail closed on a broken scan.
+`cargo test --workspace` runs the whole keyless fixture corpus:
+
+| Crate | Tests | Surface |
+|-------|-------|---------|
+| `craft-core` | 103 | the neutral vocabulary: request/event types, SSE, retry, usage |
+| `craft-providers` | 120 | the three protocol adapters |
+| `craft-tools` | 92 | the Tool trait and the loop's builtins |
+| `craft-runtime` | 22 | the run loop, budget caps, stream-json output |
+| `craft-app` | 44 | the CLI surface |
+
+Four shapes recur across every corpus:
+
+- **Round-trips** — what crosses a boundary survives unchanged: neutral
+  request/event types serialize and deserialize (`types_roundtrip`), and
+  each adapter encodes a request and folds its decoded SSE stream back
+  into the same neutral events.
+- **Folds** — a stream of provider events folds into one complete turn
+  with usage accounting and a stop reason; fold caps make oversized
+  fields and runaway tool-call counts fail closed.
+- **Hostile rows** — every input-derived value is treated as hostile:
+  overflowing `max_tokens`, malformed retry-after headers, hostile glob
+  patterns and tool arguments, hostile markers in machine-readable
+  input. Each must land as a typed error or a bounded fallback — the
+  synthetic regression corpus behind the no-panic rule.
+- **Loopback mocks** — the adapter fixture corpora serve their recorded
+  request/response rows off a loopback HTTP lane, so request encoding,
+  SSE decode, the error taxonomy, and truncation bounds are exercised
+  against a real socket — no credentials, no network.
+
+## Live corpora
+
+Six `#[ignore]`d corpora ride a real endpoint through the repo-root
+gitignored `.env`; none is part of `just check`. All live lanes ride the
+OpenAI-compatible seam; Gemini is fixtures-only in v1.
+
+- `just integration` — completions round-trip
+- `just integration_tools` — tool round-trip
+- `just integration_stream_tools` — streamed tool-delta assembly
+- `just integration_auth` — a bad key lands a typed error
+- `just integration_dialect_mount` — dialect mount over one base URL
+- `just integration_agent_loop` — the full agent loop: real turn, tool
+  dispatch, terminal record
+
+The knobs are a trio — `TEST_BYOK_BASE_URL`, `TEST_BYOK_API_KEY`,
+`TEST_BYOK_MODEL` — loaded by `craft-providers/tests/byok_env.rs`, which
+every corpus binary mounts via `#[path]`: process env wins, then a walk
+up from the crate manifest to the repo `.env`. Names are printable;
+values never are.
+
+The skip idiom, verbatim from `byok_env.rs` — the test mounts the loader
+and asks for the trio; missing keys print the SKIP line and pass:
+
+```rust
+#[tokio::test]
+#[ignore = "live corpus: requires TEST_BYOK_* in .env"]
+async fn integration() -> Result<(), TestError> {
+    let keys = crate::require_keys!("completions e2e");
+
+// macro_rules! require_keys — the SKIP arm:
+eprintln!(
+    "SKIP: TEST_BYOK_* are not set (no .env) — the live {} corpus is off",
+    $corpus
+);
+```
+
+**SKIP, never fail.** A missing or empty knob prints its SKIP reason and
+passes, so CI — which carries no `.env` — always runs every live corpus
+and stays green. A knob that is set but broken (bad key, dead gateway)
+is a loud FAIL, never a SKIP; `integration_auth` exists to prove the
+bad-key path fails with a typed error.
+
+## The gate
+
+`just check` before every commit — nothing is done until it is green.
+Eleven stages, in order:
+
+1. `cargo fmt --all --check`
+2. `cargo clippy --workspace --all-targets -- -D warnings`
+3. `cargo test --workspace` — the keyless corpus above
+4. `./scripts/scan-secrets.sh`
+5. `./scripts/scan-secrets.sh --selftest`
+6. `./scripts/identifier-scan.sh`
+7. `./scripts/identifier-scan.sh --selftest`
+8. `./scripts/check-file-length.sh`
+9. `cargo deny --locked check`
+10. `cargo machete`
+11. `cargo build --locked`
+
+What the non-compiler stages enforce:
+
+- **Secrets scan** — credential patterns plus the tracked-`.env` rule.
+- **Identifier scan** — the no-lineage gate over the whole tracked tree.
+  Both scanners fail closed — a scan that cannot run is a red gate, never
+  a silent pass — and each `--selftest` proves the canary in both
+  directions: every banned pattern fires, legal strings never trip.
+- **File length** — ≤300 effective lines per Rust file, tests included,
+  no exemptions; functions stay under 75 (`clippy.toml`).
+- **`cargo deny`** — licences, advisories, sources.
+- **`cargo machete`** — zero unused dependencies.
+- **`cargo build --locked`** — the lockfile is the contract.
+
+## CI mirrors everything
+
+`.github/workflows/ci.yml` runs the eleven gate stages verbatim — hosted
+runners lack `just`, so the workflow spells each command out, and every
+gate change lands in the justfile and the workflow in the same commit
+(the lockstep law). CI then runs the six live corpora as plain
+`--ignored` test invocations: the runner carries no `.env`, so each
+prints its SKIP line and passes, and the same corpora pass for real
+wherever a `.env` exists.

@@ -7,3 +7,15 @@ rust-version.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+craft-core = { path = "../craft-core", version = "0.1.0" }
+craft-runtime = { path = "../craft-runtime", version = "0.1.0" }
+craft-tools = { path = "../craft-tools", version = "0.1.0" }
+regex = "1"
+serde_json = "1"
+thiserror.workspace = true
+
+[dev-dependencies]
+futures = { version = "0.3", default-features = false, features = ["std", "alloc"] }
+tokio = { version = "1", features = ["macros", "rt"] }
