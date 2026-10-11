@@ -29,6 +29,8 @@ pub enum ProviderError {
     InvalidRequest { detail: String },
     #[error("transport error: {detail}")]
     Transport { detail: String },
+    #[error("request timed out: {detail}")]
+    Timeout { detail: String },
     #[error("provider stream stalled within the idle window")]
     IdleTimeout,
     #[error("provider stream closed before the turn finished")]

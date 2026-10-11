@@ -14,6 +14,7 @@ use futures::{Stream, StreamExt, stream};
 
 use super::chunk::{WireChunk, WireToolCall};
 use super::map_error_envelope;
+use crate::transport;
 
 const DONE_MARK: &str = "[DONE]";
 
@@ -191,7 +192,7 @@ fn record_terminal(lane: &mut Lane, reason: String) -> Result<(), ProviderError>
 
 fn from_sse(err: SseError<reqwest::Error>) -> ProviderError {
     match err {
-        SseError::Transport(err) => ProviderError::from(err),
+        SseError::Transport(err) => transport::classify(err),
         SseError::Malformed { detail } => ProviderError::Transport { detail },
         SseError::EventTooLarge { cap } => ProviderError::Transport {
             detail: format!("SSE event exceeded {cap} bytes"),

@@ -18,6 +18,7 @@ use super::chunk::{
     WireMessageStart,
 };
 use super::map_error_envelope;
+use crate::transport;
 
 type Reader = Pin<Box<dyn Stream<Item = Result<SseEvent, SseError<reqwest::Error>>> + Send>>;
 
@@ -322,7 +323,7 @@ fn anomaly(lane: &Lane, detail: String) -> Result<bool, ProviderError> {
 
 fn from_sse(err: SseError<reqwest::Error>) -> ProviderError {
     match err {
-        SseError::Transport(err) => ProviderError::from(err),
+        SseError::Transport(err) => transport::classify(err),
         SseError::Malformed { detail } => ProviderError::Transport { detail },
         SseError::EventTooLarge { cap } => ProviderError::Transport {
             detail: format!("SSE event exceeded {cap} bytes"),

@@ -6,6 +6,8 @@ use crate::mock::{CannedResponse, MockServer};
 use crate::wire;
 use crate::{Outcome, TestError, detail_of, provider, run, sample_request};
 use craft_core::error::ProviderError;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 fn surfaced_error(events: &[Outcome]) -> Result<ProviderError, TestError> {
@@ -164,6 +166,36 @@ async fn refused_connect_maps_to_transport_after_the_ladder() -> Result<(), Test
     assert!(
         matches!(err, ProviderError::Transport { .. }),
         "a dead endpoint surfaces as Transport: {err:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn stalled_gateway_surfaces_timeout_and_rides_the_ladder() -> Result<(), TestError> {
+    // Sockets are accepted and held, but no response byte is ever
+    // written: only the request deadline can end the wait.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let counter = accepted.clone();
+    tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((socket, _)) = listener.accept().await {
+            counter.fetch_add(1, Ordering::Relaxed);
+            held.push(socket);
+        }
+    });
+    let base_url = format!("http://{addr}/v1");
+    let provider = provider(&base_url)?.with_request_timeout(Duration::from_millis(50))?;
+    let events = run(&provider, sample_request()).await;
+    let err = surfaced_error(&events)?;
+    assert!(
+        matches!(err, ProviderError::Timeout { .. }),
+        "a stalled gateway must surface Timeout: {err:?}"
+    );
+    assert!(
+        accepted.load(Ordering::Relaxed) >= 2,
+        "the timeout row must ride the retry ladder"
     );
     Ok(())
 }

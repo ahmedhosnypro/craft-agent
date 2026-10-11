@@ -16,6 +16,8 @@ use craft_core::types::ModelRequest;
 
 use lane::lane_stream;
 
+use crate::transport;
+
 /// Production default host; the adapter appends the version and model
 /// path itself, so a lane override stays host-shaped.
 pub const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com";
@@ -35,9 +37,7 @@ pub struct GeminiProvider {
 
 impl GeminiProvider {
     pub fn new(base_url: &str, model: &str, api_key: &str) -> Result<Self, ProviderError> {
-        let client = reqwest::Client::builder()
-            .build()
-            .map_err(ProviderError::from)?;
+        let client = transport::client()?;
         Ok(Self {
             client,
             base_url: base_url.trim_end_matches('/').to_owned(),
@@ -47,10 +47,17 @@ impl GeminiProvider {
         })
     }
 
+    /// Remounts the lane over an explicit total request deadline; the
+    /// constructor's deadline comes from the shared env knob.
+    pub fn with_request_timeout(mut self, timeout: Duration) -> Result<Self, ProviderError> {
+        self.client = transport::client_with_timeout(timeout)?;
+        Ok(self)
+    }
+
     /// Sends one streaming request on the shared ladder: auth and client
     /// errors fail fast, a 429 streak surfaces with the live Retry-After,
-    /// and transient or transport failures back off — all bounded by the
-    /// shared error constants.
+    /// and transient, transport, or timeout failures back off — all
+    /// bounded by the shared error constants.
     async fn connect(&self, request: &ModelRequest) -> Result<reqwest::Response, ProviderError> {
         let body = request::encode(request)?;
         let payload =
@@ -76,7 +83,7 @@ impl GeminiProvider {
             let failure = match attempt {
                 Ok(response) if response.status().is_success() => return Ok(response),
                 Ok(response) => http_failure(response).await,
-                Err(err) => ProviderError::from(err),
+                Err(err) => transport::classify(err),
             };
             last = Some(failure.clone());
             let wait = match &failure {
@@ -88,7 +95,9 @@ impl GeminiProvider {
                     let ceiling = Duration::from_secs(RETRY_BACKOFF_CAP_SECS);
                     Some(retry_after.map_or(backoff, |after| after.min(ceiling)))
                 }
-                ProviderError::Transient { .. } | ProviderError::Transport { .. } => {
+                ProviderError::Transient { .. }
+                | ProviderError::Transport { .. }
+                | ProviderError::Timeout { .. } => {
                     rate_streak = 0;
                     Some(backoff)
                 }

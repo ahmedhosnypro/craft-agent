@@ -4,3 +4,4 @@ pub mod anthropic;
 pub mod backend;
 pub mod gemini;
 pub mod openai;
+pub mod transport;
