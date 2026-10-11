@@ -61,8 +61,8 @@ docker run --rm --network host \
   -e CRAFT_AGENT_MODEL=glm-5.3-flash \
   -e OPENAI_API_KEY \
   -e OPENAI_BASE_URL \
-  -e CRAFT_AGENT_MAX_TURNS=40 \
-  -e CRAFT_AGENT_MAX_TOKENS=4000000 \
+  -e CRAFT_AGENT_MAX_TURNS="${CRAFT_AGENT_MAX_TURNS:-40}" \
+  -e CRAFT_AGENT_MAX_TOKENS="${CRAFT_AGENT_MAX_TOKENS:-4000000}" \
   -e CRAFT_AGENT_PROMPT_FILE="/tasks/${task}.md" \
   -v "$repo_root/dist":/dist:ro \
   -v "$run_dir/workspace":/workspace \
