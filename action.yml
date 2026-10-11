@@ -44,7 +44,7 @@ inputs:
   release-repository:
     description: Repository that hosts the release assets.
     required: false
-    default: storytold/craft-agent
+    default: ahmedhosnypro/craft-agent
 
 outputs:
   digest-path:
