@@ -4,7 +4,7 @@
 #
 # Cross-compile prerequisites: the target std (installed via rustup below)
 # and a C toolchain for the target whenever the graph links C code — the
-# current pure-Rust graph needs nothing beyond the std. Build through the
+# vendored OpenSSL build needs a C compiler, perl, and make. Build through the
 # rustup proxies in ~/.cargo/bin; a distribution rustc ignores
 # rust-toolchain.toml.
 # The release ships only the craft-agent binary, so the build is scoped to
