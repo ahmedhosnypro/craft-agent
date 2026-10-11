@@ -8,7 +8,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.98"
-repository = "https://github.com/storytold/craft-agent"
+repository = "https://github.com/ahmedhosnypro/craft-agent"
 
 # A crate adopts a workspace entry only when its code first references it.
 [workspace.dependencies]
