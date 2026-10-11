@@ -1,6 +1,7 @@
 /target
 /dist
-.craft-agent/
+.craft-agent/*
+!.craft-agent/agents/
 .env
 .env.*
 !.env.example

@@ -83,7 +83,7 @@ bad-key path fails with a typed error.
 ## The gate
 
 `just check` before every commit — nothing is done until it is green.
-Eleven stages, in order:
+Thirteen stages, in order:
 
 1. `cargo fmt --all --check`
 2. `cargo clippy --workspace --all-targets -- -D warnings`
@@ -93,26 +93,32 @@ Eleven stages, in order:
 6. `./scripts/identifier-scan.sh`
 7. `./scripts/identifier-scan.sh --selftest`
 8. `./scripts/check-file-length.sh`
-9. `cargo deny --locked check`
-10. `cargo machete`
-11. `cargo build --locked`
+9. `./scripts/validate-agents.sh`
+10. `./scripts/validate-agents.sh --selftest`
+11. `cargo deny --locked check`
+12. `cargo machete`
+13. `cargo build --locked`
 
 What the non-compiler stages enforce:
 
 - **Secrets scan** — credential patterns plus the tracked-`.env` rule.
 - **Identifier scan** — the no-lineage gate over the whole tracked tree.
-  Both scanners fail closed — a scan that cannot run is a red gate, never
-  a silent pass — and each `--selftest` proves the canary in both
-  directions: every banned pattern fires, legal strings never trip.
+  All three scanners fail closed — a scan that cannot run is a red gate,
+  never a silent pass — and each `--selftest` proves the canary in both
+  directions: every banned pattern or lint rule fires, and legal content
+  never trips.
 - **File length** — ≤300 effective lines per Rust file, tests included,
   no exemptions; functions stay under 75 (`clippy.toml`).
+- **Agent validation** — `.craft-agent/agents/*.md` frontmatter, identity,
+  body, and tools/model shape rules; a missing or empty agents dir is a
+  printed skip, never a failure.
 - **`cargo deny`** — licences, advisories, sources.
 - **`cargo machete`** — zero unused dependencies.
 - **`cargo build --locked`** — the lockfile is the contract.
 
 ## CI mirrors everything
 
-`.github/workflows/ci.yml` runs the eleven gate stages verbatim — hosted
+`.github/workflows/ci.yml` runs the thirteen gate stages verbatim — hosted
 runners lack `just`, so the workflow spells each command out, and every
 gate change lands in the justfile and the workflow in the same commit
 (the lockstep law). CI then runs the six live corpora as plain

@@ -9,8 +9,9 @@ export CARGO_INCREMENTAL := "0"
 default:
     @just --list
 
-# Full quality gate: fmt + clippy + tests + both scanners (with
-# selftests) + file length + cargo deny + cargo machete + build --locked.
+# Full quality gate: fmt + clippy + tests + the scanners (with selftests)
+# + file length + agent-file validation + cargo deny + cargo machete +
+# build --locked.
 check:
     cargo fmt --all --check
     cargo clippy --workspace --all-targets -- -D warnings
@@ -20,6 +21,8 @@ check:
     ./scripts/identifier-scan.sh
     ./scripts/identifier-scan.sh --selftest
     ./scripts/check-file-length.sh
+    ./scripts/validate-agents.sh
+    ./scripts/validate-agents.sh --selftest
     cargo deny --locked check
     cargo machete
     cargo build --locked

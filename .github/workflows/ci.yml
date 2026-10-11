@@ -37,6 +37,8 @@ jobs:
       - run: ./scripts/identifier-scan.sh
       - run: ./scripts/identifier-scan.sh --selftest
       - run: ./scripts/check-file-length.sh
+      - run: ./scripts/validate-agents.sh
+      - run: ./scripts/validate-agents.sh --selftest
       - run: cargo deny --locked check
       - run: cargo machete
       - run: cargo build --locked

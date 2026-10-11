@@ -59,15 +59,18 @@ other agents can consume a run.
 - `./scripts/identifier-scan.sh` and `--selftest` (the no-lineage gate)
 - `./scripts/check-file-length.sh` (≤300 effective lines per Rust file,
   tests included, no exemptions)
+- `./scripts/validate-agents.sh` and `--selftest` (agent-file frontmatter,
+  identity, body, and tools/model shape rules)
 - `cargo deny --locked check` (licences, advisories, sources)
 - `cargo machete` (zero unused dependencies)
 - `cargo build --locked`
 
 `just check` is mirrored EXACTLY by `.github/workflows/ci.yml` (lockstep
-law): every gate change lands in both in the same commit. Both scanners
-fail closed — a scan that cannot run is a red gate, never a silent pass —
-and both carry a `--selftest` canary mode proving them in both
-directions: every banned pattern fires, and legal strings never trip.
+law): every gate change lands in both in the same commit. All three
+scanners fail closed — a scan that cannot run is a red gate, never a
+silent pass — and each carries a `--selftest` canary mode proving it in
+both directions: every banned pattern or lint rule fires, and legal
+content never trips.
 Rust files stay under 300 effective lines (`check-file-length.sh`) and
 functions under 75 (`clippy.toml`).
 

@@ -28,15 +28,18 @@ mirrored verbatim in `.github/workflows/ci.yml`.
 - `./scripts/identifier-scan.sh` and `--selftest` (the no-lineage gate)
 - `./scripts/check-file-length.sh` (≤300 effective lines per Rust file,
   tests included, no exemptions)
+- `./scripts/validate-agents.sh` and `--selftest` (agent-file frontmatter,
+  identity, body, and tools/model shape rules)
 - `cargo deny --locked check` (licences, advisories, sources)
 - `cargo machete` (zero unused dependencies)
 - `cargo build --locked`
 
-Both scanners fail closed — a scan that cannot run is a red gate, never a
-silent pass — and each `--selftest` canary proves them in both directions:
-every banned pattern fires, and legal strings never trip. Rust files stay
-under 300 effective lines (`check-file-length.sh`) and functions under 75
-(`clippy.toml`). Every gate change lands in ci.yml in the same commit.
+All three scanners fail closed — a scan that cannot run is a red gate,
+never a silent pass — and each `--selftest` canary proves it in both
+directions: every banned pattern or lint rule fires, and legal content
+never trips. Rust files stay under 300 effective lines
+(`check-file-length.sh`) and functions under 75 (`clippy.toml`). Every
+gate change lands in ci.yml in the same commit.
 
 ## RED first
 
