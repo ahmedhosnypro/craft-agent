@@ -1,0 +1,10 @@
+[
+  {
+    "sha": "bbb222",
+    "filename": "crates/craft-digest/src/prompt.rs",
+    "status": "modified",
+    "additions": 8,
+    "deletions": 1,
+    "changes": 9
+  }
+]

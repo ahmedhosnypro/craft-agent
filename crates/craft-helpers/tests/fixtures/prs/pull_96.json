@@ -1,0 +1,12 @@
+{
+  "id": 8996,
+  "number": 96,
+  "state": "closed",
+  "title": "Only visible past the first page",
+  "user": {"login": "dev6"},
+  "html_url": "https://github.com/storytold/craft-agent/pull/96",
+  "merged_at": "2026-10-11T06:00:00Z",
+  "additions": 8,
+  "deletions": 1,
+  "changed_files": 1
+}

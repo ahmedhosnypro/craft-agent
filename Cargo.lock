@@ -229,6 +229,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-helpers"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "craft-providers"
 version = "0.1.0"
 dependencies = [
@@ -937,6 +949,8 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "rustls-pki-types",
+ "serde",
+ "serde_json",
  "sync_wrapper",
  "tokio",
  "tokio-native-tls",

@@ -1,0 +1,12 @@
+{
+  "id": 9001,
+  "number": 101,
+  "state": "closed",
+  "title": "Fix the digest window clamp",
+  "user": {"login": "dev1"},
+  "html_url": "https://github.com/storytold/craft-agent/pull/101",
+  "merged_at": "2026-10-11T08:00:00Z",
+  "additions": 120,
+  "deletions": 30,
+  "changed_files": 3
+}

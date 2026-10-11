@@ -1,0 +1,10 @@
+[
+  {
+    "sha": "aaa111",
+    "filename": "crates/craft-app/src/cli.rs",
+    "status": "modified",
+    "additions": 12,
+    "deletions": 3,
+    "changes": 15
+  }
+]

@@ -1,0 +1,27 @@
+[
+  {
+    "sha": "abc123",
+    "filename": "crates/craft-digest/src/window.rs",
+    "status": "modified",
+    "additions": 42,
+    "deletions": 7,
+    "changes": 49,
+    "blob_url": "https://github.com/storytold/craft-agent/blob/abc/crates/craft-digest/src/window.rs"
+  },
+  {
+    "sha": "def456",
+    "filename": "crates/craft-app/src/cli.rs",
+    "status": "added",
+    "additions": 78,
+    "deletions": 23,
+    "changes": 101
+  },
+  {
+    "sha": "789abc",
+    "filename": "docs/04-digest.md",
+    "status": "modified",
+    "additions": 0,
+    "deletions": 0,
+    "changes": 0
+  }
+]
