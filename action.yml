@@ -1,10 +1,10 @@
-# craft-agent as a composite Action: download the release binary for the
-# runner triple, verify it against the release checksums, then run one
+# craft-agent as a composite Action: download the release binaries for the
+# runner triple, verify them against the release checksums, then run one
 # mission (run or digest). Inputs reach the run scripts through env only —
 # never through expression interpolation inside the scripts.
 name: craft-agent
 description: BYOK agentic AI agent for the storytold suite — one bounded agent turn over a prompt, or the daily suite digest.
-author: storytold
+author: ahmedhosnypro
 
 inputs:
   mission:
@@ -60,7 +60,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Install the release binary
+    - name: Install the release binaries
       id: install
       shell: bash
       env:
@@ -76,26 +76,32 @@ runs:
             exit 1
             ;;
         esac
-        asset="craft-agent-${triple}"
         base="https://github.com/${CRAFT_AGENT_RELEASE_REPOSITORY}/releases/download/${CRAFT_AGENT_VERSION}"
         dir="${RUNNER_TEMP}/craft-agent-download"
         rm -rf "$dir"
         mkdir -p "$dir"
         curl -fsSL -o "${dir}/checksums.txt" "${base}/checksums.txt"
-        recorded="$(awk -v asset="$asset" '$2 == asset || $2 ~ ("/" asset "$") { print $2; exit }' "${dir}/checksums.txt")"
-        if [ -z "$recorded" ]; then
-          echo "::error::no checksums.txt entry for ${asset} in release ${CRAFT_AGENT_VERSION}"
+        recorded_agent="$(awk -v asset="craft-agent-${triple}" '$2 == asset || $2 ~ ("/" asset "$") { print $2; exit }' "${dir}/checksums.txt")"
+        if [ -z "$recorded_agent" ]; then
+          echo "::error::no checksums.txt entry for craft-agent-${triple} in release ${CRAFT_AGENT_VERSION}"
           exit 1
         fi
-        mkdir -p "${dir}/$(dirname "$recorded")"
-        curl -fsSL -o "${dir}/${recorded}" "${base}/${asset}"
+        recorded_helpers="$(awk -v asset="craft-helpers-${triple}" '$2 == asset || $2 ~ ("/" asset "$") { print $2; exit }' "${dir}/checksums.txt")"
+        if [ -z "$recorded_helpers" ]; then
+          echo "::error::no checksums.txt entry for craft-helpers-${triple} in release ${CRAFT_AGENT_VERSION}"
+          exit 1
+        fi
+        mkdir -p "${dir}/$(dirname "$recorded_agent")" "${dir}/$(dirname "$recorded_helpers")"
+        curl -fsSL -o "${dir}/${recorded_agent}" "${base}/craft-agent-${triple}"
+        curl -fsSL -o "${dir}/${recorded_helpers}" "${base}/craft-helpers-${triple}"
         (
           cd "$dir"
           sha256sum --check checksums.txt --ignore-missing
         )
         bindir="${RUNNER_TEMP}/craft-agent-bin"
         mkdir -p "$bindir"
-        install -m 0755 "${dir}/${recorded}" "${bindir}/craft-agent"
+        install -m 0755 "${dir}/${recorded_agent}" "${bindir}/craft-agent"
+        install -m 0755 "${dir}/${recorded_helpers}" "${bindir}/craft-helpers"
         echo "$bindir" >> "$GITHUB_PATH"
 
     - name: Run the mission
@@ -129,6 +135,12 @@ runs:
           prompt_file="${RUNNER_TEMP}/craft-agent-prompt.txt"
           printf '%s' "$CRAFT_AGENT_PROMPT" > "$prompt_file"
         fi
+        if [ -n "${GH_TOKEN:-}" ]; then
+          gh auth setup-git
+        fi
+        git config --global --add safe.directory "$GITHUB_WORKSPACE"
+        git config --global user.name "craft-agent"
+        git config --global user.email "agent@craft-agent.invalid"
         cmd=(craft-agent "$mission" --max-turns "$CRAFT_AGENT_MAX_TURNS"
           --max-tokens "$CRAFT_AGENT_MAX_TOKENS")
         if [ "$mission" = "run" ]; then

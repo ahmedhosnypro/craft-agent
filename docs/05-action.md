@@ -1,8 +1,9 @@
 # 05 — The GitHub Action
 
-`action.yml` is a composite action: it downloads the release binary for
-the runner triple (Linux x86_64 and aarch64, statically linked),
-sha256-verifies it against the `checksums.txt` from the same release
+`action.yml` is a composite action: it downloads the release binaries for
+the runner triple (Linux x86_64 and aarch64, statically linked — the
+agent plus its `craft-helpers` companion), sha256-verifies them against
+the `checksums.txt` from the same release
 tag, and runs one mission — `run` or `digest`. The digest workflow and
 the live-integration workflow are the two shipped consumers.
 
@@ -19,7 +20,7 @@ the live-integration workflow are the two shipped consumers.
 | `prompt` | empty | Prompt text for the `run` mission; written to a file before the run. |
 | `github-token` | `github.token` | Exported as `GH_TOKEN` for the agent's gh tool. |
 | `version` | `v1` | Release tag the binary is downloaded from. |
-| `release-repository` | `storytold/craft-agent` | Repository hosting the release assets. |
+| `release-repository` | `ahmedhosnypro/craft-agent` | Repository hosting the release assets. |
 
 Provider keys are **not** inputs. They reach the binary only through the
 environment of the step that uses the action — map
@@ -47,10 +48,13 @@ nonzero.
 ## Binary download and integrity
 
 Each release attaches `craft-agent-x86_64-unknown-linux-musl`,
-`craft-agent-aarch64-unknown-linux-musl`, and `checksums.txt` at the same
-tag. The action picks the asset for `${RUNNER_OS}/${RUNNER_ARCH}` — any
-other triple fails with an actionable error — downloads `checksums.txt`
-first, downloads the recorded binary under the exact name the checksums
+`craft-agent-aarch64-unknown-linux-musl`,
+`craft-helpers-x86_64-unknown-linux-musl`,
+`craft-helpers-aarch64-unknown-linux-musl`, and `checksums.txt` at the
+same tag. The action picks the assets for `${RUNNER_OS}/${RUNNER_ARCH}`
+— any other triple fails with an actionable error — downloads
+`checksums.txt` first, downloads the recorded binaries under the exact
+names the checksums
 expect, and runs `sha256sum --check`. This pins integrity within a
 release; it is not a supply-chain attestation. An unsupported runner
 never falls back to building from source.
@@ -109,7 +113,7 @@ repository content. Every recipe mirrors the justfile verbatim.
 
 Every third-party action referenced anywhere is pinned by full commit
 SHA with the version in a trailing comment. Consumers of this action
-should do the same: pin `storytold/craft-agent` by full commit SHA and
+should do the same: pin `ahmedhosnypro/craft-agent` by full commit SHA and
 pin the `version` input to an exact release tag for reproducibility. The
 in-repo digest workflow deliberately consumes `./` with `version: v1`,
 riding the moving tag so the daily digest tracks the latest release.

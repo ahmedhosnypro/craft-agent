@@ -9,7 +9,8 @@ promises when credentials are absent — never model success.
 
 - The workflow is dormant: it runs only when hand-dispatched, so authoring
   it is safe before anything else exists.
-- A release with the `craft-agent-<triple>` binary and `checksums.txt`
+- A release with the `craft-agent-<triple>` and
+  `craft-helpers-<triple>` binaries and `checksums.txt`
   assets must exist in this repository (`scripts/build-release.sh` builds
   them). Dispatch with `version` set to the exact tag until the moving
   `v1` tag points at a release; the default is `v1`.

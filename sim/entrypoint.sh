@@ -13,6 +13,7 @@ DIST_DIR="${DIST_DIR:-/dist}"
 OUT_DIR="${OUT_DIR:-/out}"
 TRIPLE="${CRAFT_AGENT_TRIPLE:-x86_64-unknown-linux-musl}"
 CRAFT_AGENT_BIN="/usr/local/bin/craft-agent"
+CRAFT_HELPERS_BIN="/usr/local/bin/craft-helpers"
 
 fail() {
   printf 'entrypoint: %s\n' "$1" >&2
@@ -22,32 +23,34 @@ fail() {
 mkdir -p "$RUNNER_TEMP" "$OUT_DIR"
 
 # Install step: same verification the action performs on the release —
-# checksums.txt must name the triple's asset, the check must pass, then
-# the binary lands in a PATH dir.
+# checksums.txt must name the triple's assets, the check must pass, then
+# each binary lands in a PATH dir.
 install_binary() {
+  local tool="$1" dest="$2" asset recorded
   [ -f "${DIST_DIR}/checksums.txt" ] ||
     fail "no checksums.txt in ${DIST_DIR}; mount the release dist"
-  recorded="$(awk -v asset="craft-agent-${TRIPLE}" \
+  asset="${tool}-${TRIPLE}"
+  recorded="$(awk -v asset="$asset" \
     '$2 == asset || $2 ~ ("/" asset "$") { print $2; exit }' \
     "${DIST_DIR}/checksums.txt")"
   [ -n "$recorded" ] ||
-    fail "no checksums.txt entry for craft-agent-${TRIPLE}"
+    fail "no checksums.txt entry for ${asset}"
   [ -f "${DIST_DIR}/${recorded}" ] ||
     fail "asset ${recorded} missing from ${DIST_DIR}"
   (
     cd "$DIST_DIR"
     sha256sum --check checksums.txt --ignore-missing
   )
-  install -m 0755 "${DIST_DIR}/${recorded}" "$CRAFT_AGENT_BIN"
+  install -m 0755 "${DIST_DIR}/${recorded}" "$dest"
 }
 
-# Direct binary invocation: install first, then hand over.
+install_binary craft-agent "$CRAFT_AGENT_BIN"
+install_binary craft-helpers "$CRAFT_HELPERS_BIN"
+
+# Direct binary invocation: hand over to the installed binary.
 if [ "$#" -gt 0 ]; then
-  install_binary
   exec "$CRAFT_AGENT_BIN" "$@"
 fi
-
-install_binary
 
 # Git setup: credential helper over the runtime GH_TOKEN, the workspace
 # marked safe, and the commit identity the agent's pushes carry.

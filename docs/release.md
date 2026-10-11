@@ -10,8 +10,8 @@ third-party action it uses is pinned to a commit SHA.
 1. **build** — one native runner per arch: `ubuntu-latest` builds
    `x86_64-unknown-linux-musl`, `ubuntu-24.04-arm` builds
    `aarch64-unknown-linux-musl`. Each leg runs
-   `cargo build --release --locked -p craft-app --target <triple>` and
-   uploads the binary as an artifact.
+   `cargo build --release --locked -p craft-app -p craft-helpers
+   --target <triple>` and uploads the binaries as an artifact.
 2. **release** — runs only when every leg succeeded. It downloads the
    binaries, verifies the complete asset set exists, writes
    `checksums.txt` (`sha256sum` format, asset names in field 2), then
@@ -25,7 +25,9 @@ third-party action it uses is pinned to a commit SHA.
 | --- | --- |
 | `craft-agent-x86_64-unknown-linux-musl` | static x86_64 Linux binary |
 | `craft-agent-aarch64-unknown-linux-musl` | static aarch64 Linux binary |
-| `checksums.txt` | `sha256sum` lines for both binaries |
+| `craft-helpers-x86_64-unknown-linux-musl` | static x86_64 helpers binary |
+| `craft-helpers-aarch64-unknown-linux-musl` | static aarch64 helpers binary |
+| `checksums.txt` | `sha256sum` lines for all four binaries |
 
 The asset names are the consumption contract: the Action maps
 `Linux:X64`/`Linux:ARM64` runners to these triples, downloads the matching
