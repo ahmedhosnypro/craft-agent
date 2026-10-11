@@ -111,8 +111,7 @@ fn script(dir: &Path, body: &str) -> PathBuf {
 
 fn deps(root: &Path) -> DigestDeps {
     let gh = GhRunner::with_program(script(root, "echo '[]'"));
-    let clone_body =
-        "repo=$(basename \"$3\" .git)\nmkdir -p \"$4/src\"\nprintf 'text\n' > \"$4/AGENTS.md\"";
+    let clone_body = "mkdir -p \"$5/src\"\nprintf 'text\n' > \"$5/AGENTS.md\"";
     let clone = CloneRunner::with_program(script(root, clone_body));
     let jscpd_body = "out=\"\"\nprev=\"\"\nfor a in \"$@\"; do\n  if [ \"$prev\" = \"--output\" ]; then out=\"$a\"; fi\n  prev=\"$a\"\ndone\nmkdir -p \"$out\"\nprintf '{\"duplicates\":[]}' > \"$out/jscpd-report.json\"";
     let jscpd = JscpdRunner::with_program(script(root, jscpd_body));
