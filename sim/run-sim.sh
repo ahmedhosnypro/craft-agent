@@ -11,7 +11,6 @@ task="${1:-open-pr-01}"
 triple="x86_64-unknown-linux-musl"
 repo_url="https://github.com/ahmedhosnypro/craft-agent.git"
 env_file="$repo_root/.env"
-token_file="${GH_TOKEN_FILE:-}"
 
 fail() {
   printf 'run-sim: %s\n' "$1" >&2
@@ -32,17 +31,11 @@ set +a
 [ -n "${TEST_BYOK_API_KEY:-}" ] || fail "TEST_BYOK_API_KEY is empty in .env"
 [ -n "${TEST_BYOK_BASE_URL:-}" ] || fail "TEST_BYOK_BASE_URL is empty in .env"
 
-if [ -n "$token_file" ]; then
-  [ -f "$token_file" ] || fail "missing token file ${token_file}"
-  GH_TOKEN="$(tr -d '\r\n' < "$token_file")"
-  [ -n "$GH_TOKEN" ] || fail "the token file is empty"
-else
-  GH_TOKEN="$(gh auth token)" || fail "the host gh auth has no token — pass GH_TOKEN_FILE"
-fi
+[ -n "${GH_TOKEN:-}" ] || fail "GH_TOKEN is not set — add it to .env or export it"
 login="$(GH_TOKEN="$GH_TOKEN" gh api user --jq .login 2>/dev/null || true)"
-[ -n "$login" ] || fail "GitHub rejected the gh token — refresh it or point GH_TOKEN_FILE at a valid one"
+[ -n "$login" ] || fail "GitHub rejected GH_TOKEN — refresh it in .env or the environment"
 GH_TOKEN="$GH_TOKEN" gh repo view ahmedhosnypro/craft-agent >/dev/null 2>&1 \
-  || fail "the gh token cannot read ahmedhosnypro/craft-agent"
+  || fail "GH_TOKEN cannot read ahmedhosnypro/craft-agent"
 OPENAI_API_KEY="$TEST_BYOK_API_KEY"
 OPENAI_BASE_URL="$TEST_BYOK_BASE_URL"
 export GH_TOKEN OPENAI_API_KEY OPENAI_BASE_URL
