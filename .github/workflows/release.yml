@@ -1,8 +1,8 @@
 # The release pipeline. A pushed semver tag (or a dispatch naming an
 # existing one) builds the Linux binaries natively, one runner per
 # arch; a single release job assembles dist/, publishes draft-first so
-# a failed run never leaves a partial release, then repoints the moving
-# v1 tag at the release commit.
+# a failed run never leaves a partial release, then repoints the
+# moving major tag (v1, v2, …) matching the release at the release commit.
 name: release
 
 on:
@@ -128,13 +128,17 @@ jobs:
             dist/craft-helpers-aarch64-unknown-linux-musl \
             dist/checksums.txt --clobber
           gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --draft=false
-      - name: Move the v1 tag
+      - name: Move the major tag
         run: |
           set -euo pipefail
           case "$TAG" in
-            *-*) echo "pre-release tag ${TAG} — v1 left untouched" ;;
+            *-*) echo "pre-release tag ${TAG} — moving tag left untouched" ;;
+            v[0-9]*.*.*)
+              major="${TAG%%.*}"
+              git tag -f "$major" "$(git rev-parse HEAD)"
+              git push -f origin "$major"
+              ;;
             *)
-              git tag -f v1 "$(git rev-parse HEAD)"
-              git push -f origin v1
+              echo "unrecognized tag shape ${TAG} — moving tag left untouched"
               ;;
           esac

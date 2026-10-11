@@ -34,13 +34,14 @@ The asset names are the consumption contract: the Action maps
 binary plus `checksums.txt` from the same tag, and runs
 `sha256sum --check` before installing.
 
-## The moving `v1` tag
+## The moving major tag
 
-After publishing, the workflow repoints `v1` at the release commit and
-force-pushes it. Pre-release tags (any tag containing `-`, such as
-`v1.2.3-rc1`) never move `v1` — it always points at the latest stable
-release. The workflow itself skips `v1` pushes so the repoint cannot
-re-trigger a release.
+After publishing, the workflow repoints the moving tag matching the
+release's major — `v1.2.3` moves `v1`, a future `v2.0.0` moves `v2`
+and never disturbs `v1` consumers. Pre-release tags (any tag containing
+`-`, such as `v1.2.3-rc1`) never move it — the major tag always points
+at the latest stable release of that major. The workflow itself skips
+its own moving-tag pushes so the repoint cannot re-trigger a release.
 
 ## Consumer pinning
 
