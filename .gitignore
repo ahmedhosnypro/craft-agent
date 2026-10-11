@@ -13,3 +13,5 @@ progress.db
 progress.db-wal
 progress.db-shm
 /scripts/progress-db.sql
+sim/runs/
+sim/logs/
