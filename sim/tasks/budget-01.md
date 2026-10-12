@@ -42,11 +42,11 @@ cumulative ledger crosses the cap; that is this fixture's purpose.
 
 ## How this mission is run (operator)
 
-    CRAFT_AGENT_MAX_TOKENS=4000 sim/run-sim.sh budget-01
+    CRAFT_AGENT_MAX_TOKENS=1000 sim/run-sim.sh budget-01
 
-The knob passes through to the container: six substantial parts with
-a context that grows every turn must push cumulative usage — input,
-output, and cached tokens — past 4000 within a few turns.
+The knob passes through to the container: the first turn's context
+alone exceeds 1000 tokens, and every folded turn is charged —
+including a completing one — so the run must die with exit 3.
 
 ## Expected conclusion (operator)
 

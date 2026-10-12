@@ -20,6 +20,8 @@ expected to die at the cap; that is this fixture's purpose.
 
 ## Cadence (absolute)
 
+- Before any part, call bash once to print the current date — the
+  first assistant turn must contain that call and nothing else.
 - Produce exactly ONE part per assistant turn, in order, grounded in
   the named file. Never deliver two parts in one turn, never skip
   ahead, never compress the parts into a summary.
@@ -37,10 +39,11 @@ expected to die at the cap; that is this fixture's purpose.
 
 ## How this mission is run (operator)
 
-    CRAFT_AGENT_MAX_TURNS=2 sim/run-sim.sh max-turns-01
+    CRAFT_AGENT_MAX_TURNS=1 sim/run-sim.sh max-turns-01
 
-The knob passes through to the container: two turns allowed, five
-parts demanded — the run must die at the cap.
+The knob passes through to the container: one turn allowed, and the
+mission's first action is a tool call that structurally requires a
+second turn — the run must die at the cap.
 
 ## Expected conclusion (operator)
 
@@ -49,6 +52,6 @@ Exit 2, `conclusion=max-turns`. With `<run>` the new sim/runs entry:
 - `grep '^conclusion=max-turns$' <run>/out/outputs.env`
 - `grep run_finished <run>/out/stream.jsonl` — the line carries
   `"exit_code":2`, `"category":"max_turns"`, and the detail
-  `run aborted after max turns (2)`.
+  `run aborted after max turns (1)`.
 - `git -C <run>/workspace log --oneline -1` still names the clone's
   original HEAD: no commit, no branch, no pull request.
