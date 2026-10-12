@@ -56,6 +56,7 @@ helpers_sha="$(awk -v asset="craft-helpers-${triple}" '$2 == asset {print $1; ex
 [ -n "$agent_sha" ] || fail "no checksums.txt entry for craft-agent-${triple}"
 [ -n "$helpers_sha" ] || fail "no checksums.txt entry for craft-helpers-${triple}"
 
+mkdir -p "$repo_root/sim/runs"
 base="$repo_root/sim/runs/$(date +%Y%m%d-%H%M%S)"
 run_dir="$base"
 n=0
