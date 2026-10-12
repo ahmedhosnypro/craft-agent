@@ -114,9 +114,10 @@ jq -n \
 
 # The clone targets this repository only; the credential helper rides
 # GH_TOKEN, so the token never lands in a URL or a config file. A failed
-# clone marks the manifest and keeps the run dir as evidence. HTTP/1.1 and
-# the low-speed abort keep a stalled stream from hanging the run silently.
-if ! git -c credential.helper='!gh auth git-credential' \
+# clone marks the manifest and keeps the run dir as evidence. The hard
+# timeout bounds every phase — DNS, connect, credential helper, transfer;
+# the HTTP/1.1 and low-speed settings only guard the transfer itself.
+if ! timeout 300 git -c credential.helper='!gh auth git-credential' \
   -c http.version=HTTP/1.1 -c http.lowSpeedLimit=1000 -c http.lowSpeedTimeout=60 \
   clone "$repo_url" "$run_dir/workspace"; then
   update_manifest '.status = $status | .finished_at = $finished_at' \
