@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::error::ToolError;
 use crate::event::{self, ToolEvent, ToolProgress, ToolStream};
+use crate::ghgate;
 use crate::proc::{self, ProcEvent, ProcSpec, StreamTag};
 use crate::schema::{Prop, Schema};
 use crate::tool::{Tool, ToolCtx, ToolLimits};
@@ -39,6 +40,9 @@ impl GhTool {
             self.limits.max_path_bytes,
             self.limits.max_args,
         )?;
+        if let Some(repo) = ghgate::write_repo(ctx.env_value(ghgate::KNOB).as_deref()) {
+            ghgate::check(&argv, &repo)?;
+        }
         let wants_json = argv
             .iter()
             .any(|a| a == "--json" || a.starts_with("--json="));

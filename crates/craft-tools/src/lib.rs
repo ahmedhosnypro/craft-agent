@@ -5,12 +5,15 @@
 
 pub mod bash;
 pub mod edit;
+pub mod egress;
 pub mod envscrub;
 pub mod error;
 pub mod event;
 pub mod gh;
+pub mod ghgate;
 pub mod glob;
 pub mod grep;
+pub mod lineend;
 pub mod pathguard;
 pub mod proc;
 pub mod read;

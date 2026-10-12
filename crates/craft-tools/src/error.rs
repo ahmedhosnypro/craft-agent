@@ -57,6 +57,12 @@ pub enum ToolError {
     GhSetupGitDenied,
     #[error("gh write denied: CRAFT_AGENT_WRITE_REPO must be `owner/name`")]
     GhWriteRepoMalformed,
+    #[error("egress denied: `{host}` is not in the CRAFT_AGENT_EGRESS_ALLOWLIST")]
+    EgressHostDenied { host: String },
+    #[error(
+        "egress denied: cannot resolve the target host of a network command while CRAFT_AGENT_EGRESS_ALLOWLIST is set: `{snippet}`"
+    )]
+    EgressUnresolved { snippet: String },
     #[error("gh --json output is not valid JSON: {snippet}")]
     GhBadJson { snippet: String },
     #[error("could not spawn `{program}`: {msg}")]

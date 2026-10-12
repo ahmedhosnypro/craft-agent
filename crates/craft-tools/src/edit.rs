@@ -1,11 +1,14 @@
 //! The edit_file tool: prior-read required, exact-match replacement on
 //! bytes (so binary-ish files are never mangled), changed-on-disk
-//! detection via a content stamp.
+//! detection via a content stamp, and a pure-CRLF view model: CRLF
+//! files match on a collapsed LF view and write back CRLF, while
+//! mixed-ending files are refused.
 
 use serde_json::Value;
 
 use crate::error::ToolError;
 use crate::event::{self, ToolStream};
+use crate::lineend::{self, Endings};
 use crate::pathguard::{resolve_within, sensitive_reason};
 use crate::schema::{Prop, Schema};
 use crate::tool::{Tool, ToolCtx, ToolLimits};
@@ -22,13 +25,13 @@ pub const EDIT_PROPS: &[Prop] = &[
         name: "old_string",
         ty: Schema::Str,
         required: true,
-        desc: "The exact byte sequence to replace.",
+        desc: "The exact text to replace. Pure CRLF files are matched on an LF view, so LF or CRLF spellings both match.",
     },
     Prop {
         name: "new_string",
         ty: Schema::Str,
         required: true,
-        desc: "The replacement.",
+        desc: "The replacement. Pure CRLF files are written back with CRLF, and a CR is never doubled.",
     },
     Prop {
         name: "replace_all",
@@ -61,6 +64,12 @@ impl EditFileTool {
             return Err(ToolError::InvalidArgs {
                 tool: "edit_file".to_string(),
                 msg: "old_string must not be empty".to_string(),
+            });
+        }
+        if old == new {
+            return Err(ToolError::InvalidArgs {
+                tool: "edit_file".to_string(),
+                msg: "old_string and new_string are exactly the same".to_string(),
             });
         }
         let abs = resolve_within(
@@ -96,7 +105,16 @@ impl EditFileTool {
                 path: display(&abs),
             });
         }
-        let positions = find_all(&bytes, old.as_bytes());
+        let style = lineend::classify(&bytes);
+        if style == Endings::Mixed {
+            return Err(ToolError::EditMixedEndings {
+                path: display(&abs),
+            });
+        }
+        let file_view = lineend::view(&bytes, style);
+        let old_view = lineend::view(old.as_bytes(), style);
+        let new_view = lineend::view(new.as_bytes(), style);
+        let positions = find_all(&file_view, &old_view);
         if positions.is_empty() {
             return Err(ToolError::EditNoMatch {
                 path: display(&abs),
@@ -108,8 +126,15 @@ impl EditFileTool {
                 count: positions.len(),
             });
         }
-        let edited =
-            self.checked_splice(&abs, &bytes, old.as_bytes(), new.as_bytes(), &positions)?;
+        let spliced = self.checked_splice(&abs, &file_view, &old_view, &new_view, &positions)?;
+        let edited = lineend::materialize(&spliced, style);
+        if edited.len() > self.limits.write_cap {
+            return Err(ToolError::FileTooLarge {
+                path: display(&abs),
+                size: edited.len() as u64,
+                limit: self.limits.write_cap,
+            });
+        }
         std::fs::write(&abs, &edited).map_err(|e| ToolError::Io {
             op: "write",
             msg: e.to_string(),
@@ -211,7 +236,7 @@ impl Tool for EditFileTool {
     }
 
     fn description(&self) -> &'static str {
-        "Replaces an exact byte match in a previously read file; aborts if the file changed on disk."
+        "Replaces an exact match in a previously read file; pure CRLF files match on an LF view and write back CRLF; files with mixed line endings are refused; aborts if the file changed on disk."
     }
 
     fn params_schema(&self) -> Schema {

@@ -6,6 +6,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use serde_json::Value;
 
+use crate::egress;
 use crate::error::ToolError;
 use crate::event::{self, ToolEvent, ToolProgress, ToolStream};
 use crate::proc::{self, ProcEvent, ProcSpec, StreamTag};
@@ -18,7 +19,7 @@ pub const BASH_PROPS: &[Prop] = &[
         name: "command",
         ty: Schema::Str,
         required: true,
-        desc: "The bash script to run. Stdin is closed; output is bounded.",
+        desc: "The bash script to run. Stdin is closed; combined output is capped at 256 KiB.",
     },
     Prop {
         name: "timeout_secs",
@@ -41,6 +42,9 @@ impl BashTool {
         util::reject_unknown_keys(args, "bash", &["command", "timeout_secs"])?;
         let command =
             util::arg_str_bounded(args, "bash", "command", self.limits.max_command_bytes)?;
+        if let Some(hosts) = egress::allowlist(ctx.env_value(egress::KNOB).as_deref()) {
+            egress::check(&command, &hosts)?;
+        }
         let max_secs = self.limits.bash_max_timeout.as_secs();
         let timeout_secs = util::arg_opt_u64(args, "bash", "timeout_secs", max_secs)?;
         let timeout = match timeout_secs {
@@ -115,8 +119,10 @@ impl Tool for BashTool {
     }
 
     fn description(&self) -> &'static str {
-        "Runs a bash script in the workspace with closed stdin and a bounded timeout; \
-         nonzero exits and timeouts are reported as typed errors."
+        "Runs a bash script in the workspace with closed stdin, a bounded timeout, \
+         and a 256 KiB output cap; nonzero exits and timeouts are reported as typed \
+         errors. Use it for commands (git, gh, jq), not for reading workspace files — \
+         read_file, glob, and grep are cheaper and structured."
     }
 
     fn params_schema(&self) -> Schema {

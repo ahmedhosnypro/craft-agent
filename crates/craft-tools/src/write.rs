@@ -22,7 +22,13 @@ pub const WRITE_PROPS: &[Prop] = &[
         name: "content",
         ty: Schema::Str,
         required: true,
-        desc: "The full file content to write.",
+        desc: "The full file content to write, or the bytes to append in append mode.",
+    },
+    Prop {
+        name: "mode",
+        ty: Schema::Str,
+        required: false,
+        desc: "\"overwrite\" (default) replaces the file; \"append\" adds the bytes at EOF without a trailing newline.",
     },
 ];
 
@@ -36,9 +42,21 @@ impl WriteFileTool {
     }
 
     fn try_execute(&self, args: &Value, ctx: &ToolCtx) -> Result<ToolStream, ToolError> {
-        util::reject_unknown_keys(args, "write_file", &["path", "content"])?;
+        util::reject_unknown_keys(args, "write_file", &["path", "content", "mode"])?;
         let input = util::arg_str_bounded(args, "write_file", "path", self.limits.max_path_bytes)?;
         let content = util::arg_str(args, "write_file", "content")?;
+        let mode = util::arg_opt_str(args, "write_file", "mode", 32)?;
+        let append = match mode.as_deref() {
+            None => false,
+            Some("overwrite") => false,
+            Some("append") => true,
+            Some(_) => {
+                return Err(ToolError::InvalidArgs {
+                    tool: "write_file".to_string(),
+                    msg: "mode must be \"overwrite\" or \"append\"".to_string(),
+                });
+            }
+        };
         if content.len() > self.limits.write_cap {
             return Err(ToolError::WriteTooLarge {
                 size: content.len(),
@@ -74,13 +92,36 @@ impl WriteFileTool {
                 });
             }
         }
-        std::fs::write(&abs, content.as_bytes()).map_err(|e| ToolError::Io {
-            op: "write",
-            msg: e.to_string(),
-        })?;
-        let note = format!("wrote {} bytes to {input}", content.len());
+        let note = if append {
+            append_to(&abs, content.as_bytes())?;
+            format!("appended {} bytes to {input}", content.len())
+        } else {
+            std::fs::write(&abs, content.as_bytes()).map_err(|e| ToolError::Io {
+                op: "write",
+                msg: e.to_string(),
+            })?;
+            format!("wrote {} bytes to {input}", content.len())
+        };
         Ok(event::result_stream(note))
     }
+}
+
+/// Open in append mode and write the bytes exactly: never reads the
+/// existing content, never adds a newline, creates a missing file.
+fn append_to(abs: &std::path::Path, bytes: &[u8]) -> Result<(), ToolError> {
+    use std::io::Write as _;
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(abs)
+        .map_err(|e| ToolError::Io {
+            op: "open for append",
+            msg: e.to_string(),
+        })?;
+    file.write_all(bytes).map_err(|e| ToolError::Io {
+        op: "append",
+        msg: e.to_string(),
+    })
 }
 
 fn display(path: &std::path::Path) -> String {
@@ -93,7 +134,7 @@ impl Tool for WriteFileTool {
     }
 
     fn description(&self) -> &'static str {
-        "Writes a full file inside the workspace; missing parent directories are created."
+        "Writes a full file inside the workspace; missing parent directories are created. mode=append adds the bytes at EOF without a trailing newline."
     }
 
     fn params_schema(&self) -> Schema {
