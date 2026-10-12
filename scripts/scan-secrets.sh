@@ -37,7 +37,7 @@ secret_patterns=(
   "aws_access_key_id:AKIA[0-9A-Z]{16}"
   "github_classic_token:ghp_[A-Za-z0-9]{30,}"
   "github_finegrained_token:github_pat_[A-Za-z0-9_]{20,}"
-  "github_oauth_token:gh[os]_[A-Za-z0-9]{20,}"
+  "github_oauth_token:gh[osur]_[A-Za-z0-9]{20,}"
   "slack_token:xox[abpr]-"
   "openai_classic_key:(^|[^A-Za-z0-9])sk-[A-Za-z0-9]{20,}"
   "openai_project_key:sk-proj-[A-Za-z0-9_-]{20,}"

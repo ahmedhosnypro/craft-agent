@@ -56,6 +56,9 @@ outputs:
   conclusion:
     description: success, error, max-turns, budget, or denied.
     value: ${{ steps.agent.outputs.conclusion }}
+  exit-code:
+    description: The mission command's typed exit code; conclusion is its named form.
+    value: ${{ steps.agent.outputs.exit-code }}
 
 runs:
   using: composite
@@ -179,6 +182,7 @@ runs:
         fi
         {
           echo "conclusion=${conclusion}" >> "$GITHUB_OUTPUT"
+          echo "exit-code=${rc}" >> "$GITHUB_OUTPUT"
           echo "digest-path=${digest_path}" >> "$GITHUB_OUTPUT"
           echo "final-message<<CRAFT_AGENT_EOF" >> "$GITHUB_OUTPUT"
           printf '%s\n' "$final_message" >> "$GITHUB_OUTPUT"

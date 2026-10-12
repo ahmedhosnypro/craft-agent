@@ -61,18 +61,31 @@ check_file() {
 }
 
 offenders=0
+unreadable=0
 scanned=0
 if [ "$#" -gt 0 ]; then
   while IFS= read -r file; do
-    [ -f "$file" ] || continue
     case "$file" in
-      *.rs) check_file "$file" ;;
+      *.rs) ;;
+      *) continue ;;
     esac
+    if [ ! -f "$file" ] || [ ! -r "$file" ]; then
+      printf '\033[1;31m✖ %s: named .rs file is unreadable\033[0m\n' "$file" >&2
+      unreadable=$((unreadable + 1))
+      continue
+    fi
+    check_file "$file"
   done < <(printf '%s\n' "$@")
 else
   while IFS= read -r file; do
     check_file "$file"
   done < <(find "${ROOTS[@]}" -type f -name '*.rs' | sort)
+fi
+
+if [ "$unreadable" -ne 0 ]; then
+  printf '\033[1;31m✖ file-length check failed: %s named .rs file(s) unreadable — failing closed.\033[0m\n' \
+    "$unreadable" >&2
+  exit 1
 fi
 
 if [ "$offenders" -ne 0 ]; then

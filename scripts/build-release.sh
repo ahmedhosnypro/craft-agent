@@ -12,6 +12,7 @@
 # build is scoped to their packages; a workspace-wide build would drag in
 # members with glibc-linked dependencies.
 set -euo pipefail
+cd "$(dirname "$0")/.."
 
 arch="$(uname -m)"
 if [ "$arch" = "arm64" ]; then

@@ -22,30 +22,54 @@ fail() {
 
 mkdir -p "$RUNNER_TEMP" "$OUT_DIR"
 
-# Install step: same verification the action performs on the release —
-# checksums.txt must name the triple's assets, the check must pass, then
-# each binary lands in a PATH dir.
-install_binary() {
-  local tool="$1" dest="$2" asset recorded
-  [ -f "${DIST_DIR}/checksums.txt" ] ||
-    fail "no checksums.txt in ${DIST_DIR}; mount the release dist"
-  asset="${tool}-${TRIPLE}"
-  recorded="$(awk -v asset="$asset" \
-    '$2 == asset || $2 ~ ("/" asset "$") { print $2; exit }' \
-    "${DIST_DIR}/checksums.txt")"
-  [ -n "$recorded" ] ||
-    fail "no checksums.txt entry for ${asset}"
-  [ -f "${DIST_DIR}/${recorded}" ] ||
-    fail "asset ${recorded} missing from ${DIST_DIR}"
-  (
-    cd "$DIST_DIR"
-    sha256sum --check checksums.txt --ignore-missing
-  )
-  install -m 0755 "${DIST_DIR}/${recorded}" "$dest"
+# The container runs as root; without this, files written into the
+# host-mounted volumes land root-owned. SIM_HOST_UID is the invoking
+# user, never a secret: chown the mounts up front, then each artifact
+# as it is written.
+host_own() {
+  [ -n "${SIM_HOST_UID:-}" ] || return 0
+  chown "${SIM_HOST_UID}:${SIM_HOST_GID:-$SIM_HOST_UID}" "$1" ||
+    printf 'entrypoint: chown %s failed\n' "$1" >&2
+  return 0
 }
 
-install_binary craft-agent "$CRAFT_AGENT_BIN"
-install_binary craft-helpers "$CRAFT_HELPERS_BIN"
+if [ -n "${SIM_HOST_UID:-}" ]; then
+  chown -R "${SIM_HOST_UID}:${SIM_HOST_GID:-$SIM_HOST_UID}" \
+    "$OUT_DIR" "$RUNNER_TEMP" "$GITHUB_WORKSPACE" ||
+    printf 'entrypoint: chown of mounts failed — artifacts may stay container-owned\n' >&2
+fi
+
+# Install step: same verification the action performs on the release —
+# checksums.txt must name the triple's assets, one check pass over the
+# whole file, then each binary lands in a PATH dir.
+[ -f "${DIST_DIR}/checksums.txt" ] ||
+  fail "no checksums.txt in ${DIST_DIR}; mount the release dist"
+
+recorded_asset() {
+  awk -v asset="$1" \
+    '$2 == asset || $2 ~ ("/" asset "$") { print $2; exit }' \
+    "${DIST_DIR}/checksums.txt"
+}
+
+recorded_agent="$(recorded_asset "craft-agent-${TRIPLE}")"
+[ -n "$recorded_agent" ] ||
+  fail "no checksums.txt entry for craft-agent-${TRIPLE}"
+[ -f "${DIST_DIR}/${recorded_agent}" ] ||
+  fail "asset ${recorded_agent} missing from ${DIST_DIR}"
+
+recorded_helpers="$(recorded_asset "craft-helpers-${TRIPLE}")"
+[ -n "$recorded_helpers" ] ||
+  fail "no checksums.txt entry for craft-helpers-${TRIPLE}"
+[ -f "${DIST_DIR}/${recorded_helpers}" ] ||
+  fail "asset ${recorded_helpers} missing from ${DIST_DIR}"
+
+(
+  cd "$DIST_DIR"
+  sha256sum --check checksums.txt --ignore-missing
+)
+
+install -m 0755 "${DIST_DIR}/${recorded_agent}" "$CRAFT_AGENT_BIN"
+install -m 0755 "${DIST_DIR}/${recorded_helpers}" "$CRAFT_HELPERS_BIN"
 
 # Direct binary invocation: hand over to the installed binary.
 if [ "$#" -gt 0 ]; then
@@ -76,12 +100,14 @@ esac
 prompt_file="${RUNNER_TEMP}/prompt.txt"
 if [ -n "${CRAFT_AGENT_PROMPT:-}" ]; then
   printf '%s' "$CRAFT_AGENT_PROMPT" > "$prompt_file"
+  host_own "$prompt_file"
 elif [ -n "${CRAFT_AGENT_PROMPT_FILE:-}" ]; then
   [ -f "$CRAFT_AGENT_PROMPT_FILE" ] ||
     fail "prompt file ${CRAFT_AGENT_PROMPT_FILE} not found"
   prompt_file="$CRAFT_AGENT_PROMPT_FILE"
 else
   : > "$prompt_file"
+  host_own "$prompt_file"
 fi
 
 # The command is assembled exactly like the action's: run carries
@@ -103,6 +129,7 @@ set +e
 "${cmd[@]}" > "$stream"
 rc=$?
 set -e
+host_own "$stream"
 
 case "$rc" in
   0) conclusion="success" ;;
@@ -119,12 +146,29 @@ if [ -s "$stream" ]; then
   : "${final_message:=}"
 fi
 
+digest_path=""
+if [ "$mission" = "digest" ] && [ "$conclusion" = "success" ]; then
+  candidate="${GITHUB_WORKSPACE}/out/digest.md"
+  if [ -f "$candidate" ]; then
+    digest_path="$candidate"
+    host_own "$candidate"
+  else
+    printf 'entrypoint: digest exited 0 but produced no %s\n' "$candidate" >&2
+    conclusion="error"
+  fi
+fi
+
+# A model-emitted terminator line must not truncate the heredoc value.
 {
   echo "conclusion=${conclusion}"
+  echo "exit-code=${rc}"
+  echo "digest-path=${digest_path}"
+  echo "stream=out/stream.jsonl"
   echo "final-message<<CRAFT_AGENT_EOF"
-  printf '%s\n' "$final_message"
+  printf '%s\n' "$final_message" | sed '/^CRAFT_AGENT_EOF$/d'
   echo "CRAFT_AGENT_EOF"
 } > "${OUT_DIR}/outputs.env"
+host_own "${OUT_DIR}/outputs.env"
 
 if [ "$rc" -ne 0 ]; then
   printf '%s\n' "--- craft-agent exit code ${rc}; last stream events: ---" >&2
