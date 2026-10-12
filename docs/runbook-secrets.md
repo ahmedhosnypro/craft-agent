@@ -11,8 +11,8 @@ dispatch input, or a log.
 
 | Secret | Used by | Value |
 |---|---|---|
-| `CRAFT_AGENT_APP_CLIENT_ID` | suite-digest | The GitHub App Client ID. |
-| `CRAFT_AGENT_APP_PRIVATE_KEY` | suite-digest | The App private key file contents, including header and footer lines. |
+| `CRAFT_AGENT_APP_CLIENT_ID` | suite-digest, release | The GitHub App Client ID. |
+| `CRAFT_AGENT_APP_PRIVATE_KEY` | suite-digest, release | The App private key file contents, including header and footer lines. |
 | `OPENAI_API_KEY` | suite-digest | Only when `CRAFT_AGENT_PROVIDER` is `openai`. |
 | `ANTHROPIC_API_KEY` | suite-digest | Only when `CRAFT_AGENT_PROVIDER` is `anthropic`. |
 | `GOOGLE_API_KEY` | suite-digest | Only when `CRAFT_AGENT_PROVIDER` is `gemini`. |
