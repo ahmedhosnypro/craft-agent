@@ -6,22 +6,23 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use craft_core::error::ProviderError;
-use craft_core::events::{FoldedTurn, ModelEvent, TurnCaps, TurnFold};
+use craft_core::events::TurnCaps;
 use craft_core::provider::Provider;
 use craft_core::types::{ChatMessage, ModelRequest, ToolSpec, Usage};
 use craft_tools::{Registry, ToolCtx};
-use futures::StreamExt;
 
-use crate::budget::{budget_status, fold_error, sum_usage, zero_usage};
-use crate::call::{Flow, execute_calls};
+use crate::budget::{budget_status, sum_usage, zero_usage};
+use crate::call::{Flow, STATIONARY_DETAIL, abandon_calls, execute_calls};
 use crate::events::{CancelCategory, RuntimeEvent};
 use crate::guard::Stationarity;
 use crate::outcome::{ExitStatus, RunOutcome};
+use crate::retry;
 use crate::session::{Session, SessionError};
+use crate::step::{StepCtx, StepStop};
 
 /// Typed run knobs. Defaults mirror the digest mission: 40 turns, 4M
-/// total tokens. Env and CLI wiring stay in the app layer.
+/// total tokens. Env and CLI wiring stay in the app layer, except the
+/// step bound, which resolves its own knob when unset.
 #[derive(Debug, Clone)]
 pub struct RunConfig {
     pub system: Option<String>,
@@ -31,6 +32,9 @@ pub struct RunConfig {
     pub max_total_tokens: u64,
     /// Per-request output cap forwarded to the provider.
     pub max_tokens: u32,
+    /// Total attempts per model step after a mid-stream death; None
+    /// resolves `CRAFT_AGENT_STEP_RETRIES` (default 3).
+    pub step_attempts: Option<u32>,
     pub turn_caps: TurnCaps,
     /// Outer bound on a stalled event stream; None disables it.
     pub idle_timeout: Option<Duration>,
@@ -46,6 +50,7 @@ impl RunConfig {
             max_turns: 40,
             max_total_tokens: 4_000_000,
             max_tokens: 8192,
+            step_attempts: None,
             turn_caps: TurnCaps::default(),
             idle_timeout: None,
             workspace_root,
@@ -73,6 +78,22 @@ impl<P: Provider + Send + Sync> Runner<P> {
     /// Runs the loop to its terminal outcome; every ending passes through
     /// `finish`, so the terminal event and the outcome never disagree.
     pub async fn run(&self, prompt: &str, mut sink: impl FnMut(RuntimeEvent)) -> RunOutcome {
+        let step_attempts = match self.config.step_attempts {
+            Some(attempts) => attempts,
+            None => match retry::step_attempts_from_env() {
+                Ok(attempts) => attempts,
+                Err(err) => {
+                    return self.finish(
+                        &mut sink,
+                        ExitStatus::Error,
+                        CancelCategory::Error,
+                        err.to_string(),
+                        zero_usage(),
+                        0,
+                    );
+                }
+            },
+        };
         let mut session = match self.open_session() {
             Ok(session) => session,
             Err(err) => {
@@ -116,9 +137,19 @@ impl<P: Provider + Send + Sync> Runner<P> {
                 );
             }
             sink(RuntimeEvent::TurnStarted { turn });
-            let folded = match self.drive_turn(&session, turn, &mut sink).await {
+            let folded = match self
+                .step_ctx()
+                .drive(
+                    self.build_request(&session),
+                    turn,
+                    &mut sink,
+                    &mut total,
+                    step_attempts,
+                )
+                .await
+            {
                 Ok(folded) => folded,
-                Err(err) => {
+                Err(StepStop::Provider(err)) => {
                     return self.finish(
                         &mut sink,
                         ExitStatus::Error,
@@ -128,17 +159,17 @@ impl<P: Provider + Send + Sync> Runner<P> {
                         turn - 1,
                     );
                 }
+                Err(StepStop::Budget(detail)) => {
+                    return self.finish(
+                        &mut sink,
+                        ExitStatus::Budget,
+                        CancelCategory::Budget,
+                        detail,
+                        total,
+                        turn - 1,
+                    );
+                }
             };
-            if let Err(err) = folded.require_content() {
-                return self.finish(
-                    &mut sink,
-                    ExitStatus::Error,
-                    CancelCategory::Error,
-                    err.to_string(),
-                    total,
-                    turn,
-                );
-            }
             total = sum_usage(total, folded.usage);
             sink(RuntimeEvent::TurnUsage {
                 turn,
@@ -170,14 +201,12 @@ impl<P: Provider + Send + Sync> Runner<P> {
                 );
             }
             if let Some(detail) = budget_status(&total, self.config.max_total_tokens) {
-                return self.finish(
-                    &mut sink,
-                    ExitStatus::Budget,
-                    CancelCategory::Budget,
-                    detail,
-                    total,
-                    turn,
-                );
+                let (exit, category, reason) =
+                    match abandon_calls(&mut session, &folded.tool_calls, &detail) {
+                        Ok(()) => (ExitStatus::Budget, CancelCategory::Budget, detail),
+                        Err(err) => (ExitStatus::Error, CancelCategory::Error, err.to_string()),
+                    };
+                return self.finish(&mut sink, exit, category, reason, total, turn);
             }
             match execute_calls(
                 &self.registry,
@@ -192,14 +221,11 @@ impl<P: Provider + Send + Sync> Runner<P> {
             {
                 Ok(Flow::Continue) => {}
                 Ok(Flow::Stationary) => {
-                    let detail = String::from(
-                        "stationary run stopped: the same tool call repeated 8 times in a row",
-                    );
                     return self.finish(
                         &mut sink,
                         ExitStatus::Stationarity,
                         CancelCategory::Stationarity,
-                        detail,
+                        String::from(STATIONARY_DETAIL),
                         total,
                         turn,
                     );
@@ -228,37 +254,14 @@ impl<P: Provider + Send + Sync> Runner<P> {
         }
     }
 
-    /// Streams one model turn to a folded turn, forwarding text deltas as
-    /// events and bounding a stalled stream by the idle timeout.
-    async fn drive_turn(
-        &self,
-        session: &Session,
-        turn: u32,
-        sink: &mut dyn FnMut(RuntimeEvent),
-    ) -> Result<FoldedTurn, ProviderError> {
-        let request = self.build_request(session);
-        let mut stream = self.provider.stream(request).await?;
-        let mut fold = TurnFold::new(self.config.turn_caps);
-        loop {
-            let next = match self.config.idle_timeout {
-                Some(limit) => tokio::time::timeout(limit, stream.next())
-                    .await
-                    .map_err(|_| ProviderError::IdleTimeout)?,
-                None => stream.next().await,
-            };
-            let Some(item) = next else {
-                break;
-            };
-            let event = item?;
-            if let ModelEvent::TextDelta { text } = &event {
-                sink(RuntimeEvent::AssistantDelta {
-                    turn,
-                    text: text.clone(),
-                });
-            }
-            fold.push(event).map_err(fold_error)?;
+    /// The per-step driver over the mounted provider and the fold knobs.
+    fn step_ctx(&self) -> StepCtx<'_, P> {
+        StepCtx {
+            provider: self.provider.as_ref(),
+            idle_timeout: self.config.idle_timeout,
+            turn_caps: self.config.turn_caps,
+            max_total_tokens: self.config.max_total_tokens,
         }
-        fold.finish().map_err(fold_error)
     }
 
     /// The next request: the full model-visible transcript plus the

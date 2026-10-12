@@ -4,6 +4,7 @@
 //! ```text
 //! {"type":"turn_started","turn":1}
 //! {"type":"assistant_delta","turn":1,"text":"..."}
+//! {"type":"turn_retried","turn":1,"attempt":1,"reason":"stream_closed"}
 //! {"type":"tool_call","turn":1,"index":0,"id":"c1","name":"read_file","arguments":"{}"}
 //! {"type":"tool_progress","turn":1,"name":"bash","stream":"stdout","text":"..."}
 //! {"type":"tool_result","turn":1,"call_id":"c1","name":"read_file","is_error":false,"content":"..."}
@@ -12,7 +13,10 @@
 //! ```
 //!
 //! `run_finished` is always the last line; its `exit_code` doubles as the
-//! process exit code and `category` is the cancellation category.
+//! process exit code and `category` is the cancellation category. A
+//! `turn_retried` line marks a replayed model step: the partial text the
+//! run already streamed for that turn is void, `attempt` is the 1-based
+//! number of the failed attempt, and `reason` is a stable token.
 
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +40,11 @@ pub enum RuntimeEvent {
     AssistantDelta {
         turn: u32,
         text: String,
+    },
+    TurnRetried {
+        turn: u32,
+        attempt: u32,
+        reason: String,
     },
     ToolCall {
         turn: u32,

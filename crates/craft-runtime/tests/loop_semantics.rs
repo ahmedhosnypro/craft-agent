@@ -18,7 +18,8 @@
 //      carries exit code + category + total usage
 //
 // Scenarios 5-6 live in budget.rs, 7 in stationarity.rs, 8 in
-// denial.rs, 9 in session_log.rs, 10 in stream_json.rs.
+// denial.rs, 9 in session_log.rs, 10 in stream_json.rs. The step ladder
+// lives in step_retry.rs; this corpus pins fail-fast (one attempt).
 
 mod common;
 
@@ -27,7 +28,9 @@ use craft_core::types::{ChatMessage, StopReason};
 use craft_runtime::{CancelCategory, RunConfig, Runner};
 
 fn config() -> RunConfig {
-    RunConfig::new(std::path::PathBuf::from("."))
+    let mut config = RunConfig::new(std::path::PathBuf::from("."));
+    config.step_attempts = Some(1);
+    config
 }
 
 #[tokio::test]

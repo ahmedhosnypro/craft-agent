@@ -87,6 +87,18 @@ pub fn usage(input: u64, output: u64) -> Usage {
     }
 }
 
+/// Usage with the subset buckets set, for budget double-count rows.
+pub fn bucketed_usage(input: u64, output: u64, cache_read: u64, reasoning: u64) -> Usage {
+    Usage {
+        input_tokens: input,
+        output_tokens: output,
+        cache_read_tokens: cache_read,
+        cache_write_tokens: 0,
+        reasoning_tokens: reasoning,
+        incomplete: false,
+    }
+}
+
 /// A turn that streams text and finishes with the given stop reason.
 pub fn text_turn(text: &str, stop: StopReason, used: Usage) -> Turn {
     Turn::Events(vec![
@@ -133,6 +145,25 @@ pub fn failing_turn(detail: &str) -> Turn {
 pub fn stream_error_turn(detail: &str) -> Turn {
     Turn::Events(vec![Err(ProviderError::Transport {
         detail: String::from(detail),
+    })])
+}
+
+/// A turn whose stream dies mid-turn: some text arrives, then the typed
+/// error. The partial content is void once the step replays.
+pub fn dying_turn(err: ProviderError) -> Turn {
+    Turn::Events(vec![
+        Ok(ModelEvent::TextDelta {
+            text: String::from("partial"),
+        }),
+        Err(err),
+    ])
+}
+
+/// A complete turn with no content and the given terminal stop reason.
+pub fn empty_stop_turn(stop: StopReason, used: Usage) -> Turn {
+    Turn::Events(vec![Ok(ModelEvent::TurnFinished {
+        stop_reason: stop,
+        usage: used,
     })])
 }
 

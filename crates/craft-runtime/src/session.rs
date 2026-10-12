@@ -64,7 +64,8 @@ impl Session {
         })
     }
 
-    /// Parses an existing record file into messages, in order.
+    /// Parses an existing record file into messages, in order; every
+    /// record must end in a newline so an append can never fuse records.
     pub fn load(path: &Path) -> Result<Vec<ChatMessage>, SessionError> {
         let file = File::open(path).map_err(|err| SessionError::Read {
             msg: err.to_string(),
@@ -81,26 +82,48 @@ impl Session {
                 cap: MAX_FILE_BYTES,
             });
         }
-        let reader = BufReader::new(file);
+        let mut reader = BufReader::new(file);
+        let mut raw: Vec<u8> = Vec::new();
         let mut messages = Vec::new();
-        for (index, line) in reader.lines().enumerate() {
-            let line = line.map_err(|err| SessionError::Read {
-                msg: err.to_string(),
-            })?;
-            if line.len() > MAX_LINE_BYTES {
+        let mut index = 0usize;
+        loop {
+            raw.clear();
+            let read = reader
+                .read_until(b'\n', &mut raw)
+                .map_err(|err| SessionError::Read {
+                    msg: err.to_string(),
+                })?;
+            if read == 0 {
+                break;
+            }
+            index += 1;
+            if raw.last() != Some(&b'\n') {
+                return Err(SessionError::CorruptLine {
+                    line: index,
+                    detail: String::from("record is not newline-terminated"),
+                });
+            }
+            raw.pop();
+            if raw.last() == Some(&b'\r') {
+                raw.pop();
+            }
+            if raw.len() > MAX_LINE_BYTES {
                 return Err(SessionError::LineTooLarge {
-                    line: index + 1,
+                    line: index,
                     cap: MAX_LINE_BYTES,
                 });
             }
-            if line.trim().is_empty() {
+            if raw.is_empty() {
                 return Err(SessionError::CorruptLine {
-                    line: index + 1,
+                    line: index,
                     detail: String::from("blank line"),
                 });
             }
-            let message = serde_json::from_str(&line).map_err(|err| SessionError::CorruptLine {
-                line: index + 1,
+            let line = std::str::from_utf8(&raw).map_err(|err| SessionError::Read {
+                msg: err.to_string(),
+            })?;
+            let message = serde_json::from_str(line).map_err(|err| SessionError::CorruptLine {
+                line: index,
                 detail: err.to_string(),
             })?;
             messages.push(message);

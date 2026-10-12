@@ -158,3 +158,64 @@ async fn truncated_final_line_is_a_typed_error() {
         Err(SessionError::CorruptLine { line: 2, .. })
     ));
 }
+
+#[tokio::test]
+async fn a_budget_exit_answers_pending_calls_so_the_record_resumes() {
+    let path = session_path("budget-resume");
+    let provider = FakeProvider::new(vec![tool_turn("c1", "scripted", "{}", usage(15, 10))]);
+    let mut cfg = config(path.clone());
+    cfg.max_total_tokens = 20;
+    let runner = Runner::new(provider, registry_with_ok("scripted", "out"), cfg);
+    let (outcome, _) = run_collect(&runner, "spend").await;
+    assert_eq!(outcome.exit_code(), 3);
+
+    let record: Vec<ChatMessage> = lines(&path)
+        .iter()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(matches!(
+        record.last(),
+        Some(ChatMessage::Tool {
+            call_id,
+            is_error: true,
+            content,
+            ..
+        }) if call_id == "c1"
+            && content.contains("tool call not completed: token budget exceeded")
+    ));
+
+    let provider = FakeProvider::new(vec![text_turn("done", StopReason::EndTurn, usage(1, 1))]);
+    let runner = Runner::new(
+        provider.clone(),
+        registry_with_ok("scripted", "x"),
+        config(path),
+    );
+    let (outcome, _) = run_collect(&runner, "resume").await;
+    assert_eq!(outcome.exit_code(), 0);
+    let request = &provider.requests()[0];
+    assert_eq!(request.messages[..record.len()], record[..]);
+    assert!(matches!(
+        request.messages.last(),
+        Some(ChatMessage::User { text }) if text == "resume"
+    ));
+}
+
+#[tokio::test]
+async fn torn_tail_without_newline_is_a_typed_error() {
+    let path = session_path("torn");
+    let good = serde_json::to_string(&ChatMessage::User {
+        text: String::from("fine"),
+    })
+    .unwrap();
+    std::fs::write(&path, good).unwrap();
+
+    assert!(matches!(
+        Session::load(&path),
+        Err(SessionError::CorruptLine { line: 1, .. })
+    ));
+    let loaded = Session::open(path);
+    assert!(matches!(
+        loaded,
+        Err(SessionError::CorruptLine { line: 1, .. })
+    ));
+}

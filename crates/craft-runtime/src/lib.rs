@@ -17,6 +17,9 @@ pub mod session;
 mod budget;
 mod call;
 mod guard;
+mod step;
+
+pub mod retry;
 
 pub use events::{CancelCategory, RuntimeEvent, ToolStreamName};
 pub use outcome::{ExitStatus, RunOutcome};

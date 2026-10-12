@@ -4,11 +4,36 @@
 mod common;
 
 use common::*;
+use craft_core::events::ModelEvent;
 use craft_core::types::{ChatMessage, StopReason};
 use craft_runtime::{CancelCategory, RunConfig, Runner};
+use std::path::PathBuf;
 
 fn config() -> RunConfig {
     RunConfig::new(std::path::PathBuf::from("."))
+}
+
+fn config_with_session(path: PathBuf) -> RunConfig {
+    let mut cfg = config();
+    cfg.session_path = Some(path);
+    cfg
+}
+
+fn triple_tool_turn() -> Turn {
+    let mut events = Vec::new();
+    for (index, id) in ["c1", "c2", "c3"].into_iter().enumerate() {
+        events.push(Ok(ModelEvent::ToolCallDelta {
+            index: index as u64,
+            id: Some(String::from(id)),
+            name: Some(String::from("scripted")),
+            arguments: String::from("{}"),
+        }));
+    }
+    events.push(Ok(ModelEvent::TurnFinished {
+        stop_reason: StopReason::ToolUse,
+        usage: usage(1, 1),
+    }));
+    Turn::Events(events)
 }
 
 fn nudge_count(messages: &[ChatMessage]) -> usize {
@@ -85,4 +110,54 @@ async fn changing_arguments_resets_the_streak() {
     for request in provider.requests() {
         assert_eq!(nudge_count(&request.messages), 0);
     }
+}
+
+#[tokio::test]
+async fn a_stationary_stop_answers_the_calls_the_turn_never_ran() {
+    let path = session_path("stationarity-record");
+    let provider = FakeProvider::new(vec![
+        triple_tool_turn(),
+        triple_tool_turn(),
+        triple_tool_turn(),
+    ]);
+    let runner = Runner::new(
+        provider,
+        registry_with_ok("scripted", "out"),
+        config_with_session(path.clone()),
+    );
+    let (outcome, _) = run_collect(&runner, "loop forever").await;
+
+    assert_eq!(outcome.exit_code(), 2);
+    assert_eq!(outcome.category, CancelCategory::Stationarity);
+    let record: Vec<ChatMessage> = std::fs::read_to_string(&path)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let results = &record[record.len() - 3..];
+    assert!(matches!(
+        &results[0],
+        ChatMessage::Tool {
+            call_id,
+            is_error: false,
+            ..
+        } if call_id == "c1"
+    ));
+    assert!(matches!(
+        &results[1],
+        ChatMessage::Tool {
+            call_id,
+            is_error: false,
+            ..
+        } if call_id == "c2"
+    ));
+    assert!(matches!(
+        &results[2],
+        ChatMessage::Tool {
+            call_id,
+            is_error: true,
+            content,
+            ..
+        } if call_id == "c3" && content.contains("stationary run stopped")
+    ));
 }

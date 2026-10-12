@@ -3,7 +3,7 @@
 //! `is_error` results; sensitive-path and workspace-escape denials
 //! abort the run with the exit-4 family.
 
-use craft_core::types::ToolCall;
+use craft_core::types::{ChatMessage, ToolCall};
 use craft_tools::{OutStream, ToolCtx, ToolError, ToolEvent};
 use futures::StreamExt;
 
@@ -11,11 +11,34 @@ use crate::events::{CancelCategory, RuntimeEvent, ToolStreamName};
 use crate::guard::{Guard, NUDGE_TEXT, Stationarity};
 use crate::session::{Session, SessionError};
 
+/// The stationarity stop detail; shared with the runner so the guard's
+/// message and the run record never drift apart.
+pub(crate) const STATIONARY_DETAIL: &str =
+    "stationary run stopped: the same tool call repeated 8 times in a row";
+
 /// How the flow continues after a turn's tool calls.
 pub(crate) enum Flow {
     Continue,
     Stationary,
     Denied(CancelCategory, String),
+}
+
+/// Appends one error tool result per call that will never execute, so a
+/// terminal exit leaves a transcript the provider accepts on resume:
+/// every logged tool_use has its tool_result.
+pub(crate) fn abandon_calls(
+    session: &mut Session,
+    calls: &[ToolCall],
+    detail: &str,
+) -> Result<(), SessionError> {
+    for call in calls {
+        session.append(ChatMessage::Tool {
+            call_id: call.id.clone(),
+            content: format!("tool call not completed: {detail}"),
+            is_error: true,
+        })?;
+    }
+    Ok(())
 }
 
 /// The single result of one tool call: its model-visible content.
@@ -54,7 +77,10 @@ pub(crate) async fn execute_calls(
         let outcome = execute_one(registry, ctx, call, turn, sink).await;
         let (content, is_error) = match outcome {
             ToolOutcome::Done { content, is_error } => (content, is_error),
-            ToolOutcome::Denied { category, detail } => return Ok(Flow::Denied(category, detail)),
+            ToolOutcome::Denied { category, detail } => {
+                abandon_calls(session, &calls[index..], &detail)?;
+                return Ok(Flow::Denied(category, detail));
+            }
         };
         session.append(craft_core::types::ChatMessage::Tool {
             call_id: call.id.clone(),
@@ -69,7 +95,10 @@ pub(crate) async fn execute_calls(
             content,
         });
         match guard.observe(call) {
-            Guard::Stop => return Ok(Flow::Stationary),
+            Guard::Stop => {
+                abandon_calls(session, &calls[index + 1..], STATIONARY_DETAIL)?;
+                return Ok(Flow::Stationary);
+            }
             Guard::Nudge => nudge = true,
             Guard::Continue => {}
         }
