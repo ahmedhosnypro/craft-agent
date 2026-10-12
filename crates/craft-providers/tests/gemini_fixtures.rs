@@ -61,9 +61,12 @@ pub fn sample_request() -> ModelRequest {
         system: Some(String::from("You are a digest agent.")),
         messages: vec![ChatMessage::User {
             text: String::from("Summarize the merged PRs."),
+            images: Vec::new(),
         }],
         tools: Vec::new(),
         max_tokens: 128,
+        tool_choice: None,
+        sampling: None,
     }
 }
 
@@ -74,6 +77,7 @@ pub fn replay_request(assistant_text: &str) -> ModelRequest {
         messages: vec![
             ChatMessage::User {
                 text: String::from("List the failing checks."),
+                images: Vec::new(),
             },
             ChatMessage::Assistant {
                 text: String::from(assistant_text),
@@ -88,10 +92,13 @@ pub fn replay_request(assistant_text: &str) -> ModelRequest {
                 call_id: String::from("call_a"),
                 content: String::from("0 files"),
                 is_error: true,
+                images: Vec::new(),
             },
         ],
         tools: vec![tool_spec("bash")],
         max_tokens: 128,
+        tool_choice: None,
+        sampling: None,
     }
 }
 

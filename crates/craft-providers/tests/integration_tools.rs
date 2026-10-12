@@ -56,9 +56,14 @@ async fn integration_tools() -> Result<(), TestError> {
     let tools = vec![weather_tool()];
     let request = ModelRequest {
         system: Some(system.clone()),
-        messages: vec![ChatMessage::User { text: ask.clone() }],
+        messages: vec![ChatMessage::User {
+            text: ask.clone(),
+            images: Vec::new(),
+        }],
         tools: tools.clone(),
         max_tokens: 1024,
+        tool_choice: None,
+        sampling: None,
     };
     let first = tokio::time::timeout(LIVE_BOUND, live_turn(&provider, request))
         .await
@@ -82,7 +87,10 @@ async fn integration_tools() -> Result<(), TestError> {
     let request = ModelRequest {
         system: Some(system),
         messages: vec![
-            ChatMessage::User { text: ask },
+            ChatMessage::User {
+                text: ask,
+                images: Vec::new(),
+            },
             ChatMessage::Assistant {
                 text: first.text.clone(),
                 tool_calls: first.tool_calls.clone(),
@@ -94,10 +102,13 @@ async fn integration_tools() -> Result<(), TestError> {
                     "{\"city\": \"Cairo\", \"temp_c\": 21, \"condition\": \"clear\"}",
                 ),
                 is_error: false,
+                images: Vec::new(),
             },
         ],
         tools,
         max_tokens: 1024,
+        tool_choice: None,
+        sampling: None,
     };
     let second = tokio::time::timeout(LIVE_BOUND, live_turn(&provider, request))
         .await

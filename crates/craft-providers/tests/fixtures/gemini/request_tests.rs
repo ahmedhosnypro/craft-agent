@@ -165,6 +165,7 @@ async fn json_object_results_ride_verbatim() -> Result<(), TestError> {
             call_id: String::from("call_j"),
             content: String::from("{\"output\": \"3C\"}"),
             is_error: false,
+            images: Vec::new(),
         },
     ];
     let events = run(&provider(&server.base_url)?, request).await;
@@ -186,6 +187,7 @@ async fn unpaired_tool_result_is_rejected_before_the_wire() -> Result<(), TestEr
         call_id: String::from("call_missing"),
         content: String::from("orphan"),
         is_error: false,
+        images: Vec::new(),
     }];
     let events = run(&provider(&server.base_url)?, request).await;
     assert_eq!(server.request_count(), 0, "no request leaves the adapter");

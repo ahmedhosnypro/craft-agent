@@ -32,6 +32,7 @@ fn model_request_round_trips_with_every_message_role() -> Result<(), serde_json:
         messages: vec![
             ChatMessage::User {
                 text: String::from("list files"),
+                images: Vec::new(),
             },
             ChatMessage::Assistant {
                 text: String::from("running"),
@@ -42,6 +43,7 @@ fn model_request_round_trips_with_every_message_role() -> Result<(), serde_json:
                 call_id: String::from("call_7"),
                 content: String::from("file_a\nfile_b"),
                 is_error: false,
+                images: Vec::new(),
             },
         ],
         tools: vec![ToolSpec {
@@ -53,6 +55,8 @@ fn model_request_round_trips_with_every_message_role() -> Result<(), serde_json:
             }),
         }],
         max_tokens: 4096,
+        tool_choice: None,
+        sampling: None,
     };
     let json = serde_json::to_string(&request)?;
     assert!(json.contains("\"role\":\"user\""));
@@ -68,6 +72,7 @@ fn tool_result_error_flag_round_trips() -> Result<(), serde_json::Error> {
         call_id: String::from("call_9"),
         content: String::from("command failed"),
         is_error: true,
+        images: Vec::new(),
     };
     let json = serde_json::to_string(&message)?;
     assert!(json.contains("\"is_error\":true"));
@@ -82,6 +87,8 @@ fn minimal_model_request_round_trips() -> Result<(), serde_json::Error> {
         messages: Vec::new(),
         tools: Vec::new(),
         max_tokens: 1,
+        tool_choice: None,
+        sampling: None,
     };
     assert_eq!(round_trip(request.clone())?, request);
     Ok(())
@@ -148,6 +155,7 @@ fn folded_turn_and_caps_round_trip() -> Result<(), serde_json::Error> {
     let turn = FoldedTurn {
         text: String::from("done"),
         tool_calls: vec![sample_tool_call()],
+        native_blocks: None,
         stop_reason: StopReason::EndTurn,
         usage: Usage::omitted(),
     };

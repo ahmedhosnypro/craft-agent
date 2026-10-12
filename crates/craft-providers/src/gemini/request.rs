@@ -52,7 +52,7 @@ pub(super) fn encode(request: &ModelRequest) -> Result<Value, ProviderError> {
 /// error flag rides the response object's documented error key.
 fn encode_message(message: &ChatMessage, prior: &[ChatMessage]) -> Result<Value, ProviderError> {
     match message {
-        ChatMessage::User { text } => Ok(serde_json::json!({
+        ChatMessage::User { text, .. } => Ok(serde_json::json!({
             "role": "user",
             "parts": [{"text": text}]
         })),
@@ -83,6 +83,7 @@ fn encode_message(message: &ChatMessage, prior: &[ChatMessage]) -> Result<Value,
             call_id,
             content,
             is_error,
+            ..
         } => {
             let name = resolve_call_name(prior, call_id)?;
             let mut response = serde_json::Map::new();

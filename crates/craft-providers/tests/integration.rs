@@ -42,9 +42,12 @@ async fn integration() -> Result<(), TestError> {
         system: Some(String::from("You are a test agent. Answer briefly.")),
         messages: vec![ChatMessage::User {
             text: String::from("Reply with one short sentence confirming you are running."),
+            images: Vec::new(),
         }],
         tools: Vec::new(),
         max_tokens: 512,
+        tool_choice: None,
+        sampling: None,
     };
     let turn = tokio::time::timeout(LIVE_BOUND, live_turn(&provider, request))
         .await

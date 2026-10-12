@@ -50,9 +50,12 @@ async fn integration_auth() -> Result<(), TestError> {
         system: Some(String::from("You are a test agent.")),
         messages: vec![ChatMessage::User {
             text: String::from("ping"),
+            images: Vec::new(),
         }],
         tools: Vec::new(),
         max_tokens: 16,
+        tool_choice: None,
+        sampling: None,
     };
     let err = tokio::time::timeout(LIVE_BOUND, surface_error(&provider, request))
         .await

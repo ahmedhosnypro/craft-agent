@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 pub enum ChatMessage {
     User {
         text: String,
+        /// Image attachments; absent serializes identically to the
+        /// image-less shape.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        images: Vec<ImagePart>,
     },
     Assistant {
         text: String,
@@ -22,7 +26,19 @@ pub enum ChatMessage {
         call_id: String,
         content: String,
         is_error: bool,
+        /// Image attachments; absent serializes identically to the
+        /// image-less shape.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        images: Vec<ImagePart>,
     },
+}
+
+/// An image attachment on a user or tool message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ImagePart {
+    Base64 { media_type: String, data: String },
+    Url { url: String },
 }
 
 /// Which dialect a passthrough block set belongs to; adapters reject a
@@ -62,13 +78,37 @@ pub struct ToolSpec {
     pub parameters: serde_json::Value,
 }
 
-/// One model turn request; the provider adds model and endpoint config.
+/// How the model may pick tools for a turn.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolChoice {
+    Auto,
+    Any,
+    Tool { name: String },
+}
+
+/// Sampling knobs; absent fields mean "provider default".
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Sampling {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f64>,
+    #[serde(default)]
+    pub stop_sequences: Vec<String>,
+}
+
+/// One model turn request; the provider adds model and endpoint config.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelRequest {
     pub system: Option<String>,
     pub messages: Vec<ChatMessage>,
     pub tools: Vec<ToolSpec>,
     pub max_tokens: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ToolChoice>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sampling: Option<Sampling>,
 }
 
 /// Why a turn stopped, across every dialect. Unknown finish reasons land

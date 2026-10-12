@@ -48,6 +48,7 @@ async fn integration_stream_tools() -> Result<(), TestError> {
         )),
         messages: vec![ChatMessage::User {
             text: String::from("What is the weather in Cairo? Use the tool."),
+            images: Vec::new(),
         }],
         tools: vec![ToolSpec {
             name: String::from("get_weather"),
@@ -59,6 +60,8 @@ async fn integration_stream_tools() -> Result<(), TestError> {
             }),
         }],
         max_tokens: 1024,
+        tool_choice: None,
+        sampling: None,
     };
     let (turn, tool_deltas) = tokio::time::timeout(LIVE_BOUND, live_assembly(&provider, request))
         .await

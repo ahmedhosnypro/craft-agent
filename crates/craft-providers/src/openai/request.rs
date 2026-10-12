@@ -55,7 +55,7 @@ pub(super) fn encode(request: &ModelRequest, model: &str) -> Result<Value, Provi
 /// the runtime composed.
 fn encode_message(message: &ChatMessage) -> Result<Value, ProviderError> {
     match message {
-        ChatMessage::User { text } => Ok(serde_json::json!({"role": "user", "content": text})),
+        ChatMessage::User { text, .. } => Ok(serde_json::json!({"role": "user", "content": text})),
         ChatMessage::Assistant {
             text,
             tool_calls,

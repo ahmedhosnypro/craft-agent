@@ -13,7 +13,7 @@ pub(super) fn encode(request: &ModelRequest, model: &str) -> Result<Value, Provi
     let mut results: Vec<Value> = Vec::new();
     for message in &request.messages {
         match message {
-            ChatMessage::User { text } => {
+            ChatMessage::User { text, .. } => {
                 flush_results(&mut messages, &mut results);
                 messages.push(serde_json::json!({"role": "user", "content": text}));
             }
@@ -29,6 +29,7 @@ pub(super) fn encode(request: &ModelRequest, model: &str) -> Result<Value, Provi
                 call_id,
                 content,
                 is_error,
+                ..
             } => results.push(tool_result_block(call_id, content, *is_error)),
         }
     }
