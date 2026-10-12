@@ -125,6 +125,9 @@ pub fn fake_gh(dir: &Path, body: &str) -> PathBuf {
     let path = dir.join("gh");
     fs::write(&path, script).expect("fake gh write");
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("fake gh chmod");
+    fs::File::open(&path)
+        .and_then(|f| f.sync_all())
+        .expect("fake gh sync");
     dir.to_path_buf()
 }
 
