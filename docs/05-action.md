@@ -19,6 +19,7 @@ the live-integration workflow are the two shipped consumers.
 | `max-tokens` | `4000000` | Total token budget cap. |
 | `prompt` | empty | Prompt text for the `run` mission; written to a file before the run. |
 | `github-token` | `github.token` | Exported as `GH_TOKEN` for the agent's gh tool. |
+| `read-roots` | empty | Extra read-only roots for `read_file`/`glob`/`grep`, comma separated, absolute paths; empty defaults to the runner temp directory, `off` disables the feature. |
 | `version` | `v1` | Release tag the binary is downloaded from. |
 | `release-repository` | `ahmedhosnypro/craft-agent` | Repository hosting the release assets. |
 

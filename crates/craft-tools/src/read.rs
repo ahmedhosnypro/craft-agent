@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::error::ToolError;
 use crate::event::{self, ToolStream};
-use crate::pathguard::{resolve_within, sensitive_reason};
+use crate::pathguard::{resolve_read, sensitive_reason};
 use crate::schema::{Prop, Schema};
 use crate::tool::{Tool, ToolCtx, ToolLimits};
 use crate::util;
@@ -16,7 +16,7 @@ pub const READ_PROPS: &[Prop] = &[Prop {
     name: "path",
     ty: Schema::Str,
     required: true,
-    desc: "File path relative to the workspace root, or absolute inside it.",
+    desc: "File path relative to the workspace root, or absolute inside it or a configured read root.",
 }];
 
 pub struct ReadFileTool {
@@ -31,9 +31,10 @@ impl ReadFileTool {
     fn try_execute(&self, args: &Value, ctx: &ToolCtx) -> Result<ToolStream, ToolError> {
         util::reject_unknown_keys(args, "read_file", &["path"])?;
         let input = util::arg_str_bounded(args, "read_file", "path", self.limits.max_path_bytes)?;
-        let abs = resolve_within(
+        let abs = resolve_read(
             "read_file",
             ctx.workspace_root(),
+            ctx.read_roots(),
             &input,
             self.limits.max_path_bytes,
         )?;
@@ -102,7 +103,7 @@ impl Tool for ReadFileTool {
     }
 
     fn description(&self) -> &'static str {
-        "Reads a UTF-8 text file inside the workspace; content above the size guard is rejected."
+        "Reads a UTF-8 text file inside the workspace or a configured read root; content above the size guard is rejected."
     }
 
     fn params_schema(&self) -> Schema {

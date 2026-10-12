@@ -79,6 +79,7 @@ Environment overrides read by `run-sim.sh` at run time:
 | `CRAFT_AGENT_RESULT_WINDOW_TURNS` | `20` | turns of tool results kept verbatim in the prompt |
 | `CRAFT_AGENT_EGRESS_ALLOWLIST` | unset | hosts bash commands may talk to; unset or empty means ungated |
 | `CRAFT_AGENT_WRITE_REPO` | unset | `owner/name` the gh tool may write to; unset or empty means ungated |
+| `CRAFT_AGENT_READ_ROOTS` | `/runner/temp` | extra read-only roots for read_file/glob/grep, comma separated; the file tools read absolute paths inside them |
 
 ## Task files
 

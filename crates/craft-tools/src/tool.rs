@@ -10,6 +10,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use crate::envscrub;
+use crate::pathguard::{READ_ROOTS_KNOB, parse_read_roots};
 
 use crate::event::ToolStream;
 use crate::schema::Schema;
@@ -81,34 +82,47 @@ where
 }
 
 /// Per-run context shared by every tool call: the workspace root, the
-/// child-env source, and the read stamps backing edit_file's
-/// prior-read and changed-on-disk guards.
+/// child-env source, the extra read roots, and the read stamps backing
+/// edit_file's prior-read and changed-on-disk guards.
 #[derive(Debug, Clone)]
 pub struct ToolCtx {
     workspace_root: PathBuf,
     env: EnvSource,
+    read_roots: Vec<PathBuf>,
     reads: Arc<Mutex<HashMap<PathBuf, u64>>>,
 }
 
 impl ToolCtx {
     pub fn new(workspace_root: PathBuf) -> Self {
-        Self {
+        let mut ctx = Self {
             workspace_root,
             env: EnvSource::Process,
+            read_roots: Vec::new(),
             reads: Arc::new(Mutex::new(HashMap::new())),
-        }
+        };
+        ctx.read_roots = parse_read_roots(ctx.env_value(READ_ROOTS_KNOB).as_deref());
+        ctx
     }
 
     pub fn with_env(workspace_root: PathBuf, env: Vec<(String, String)>) -> Self {
-        Self {
+        let mut ctx = Self {
             workspace_root,
             env: EnvSource::Explicit(env),
+            read_roots: Vec::new(),
             reads: Arc::new(Mutex::new(HashMap::new())),
-        }
+        };
+        ctx.read_roots = parse_read_roots(ctx.env_value(READ_ROOTS_KNOB).as_deref());
+        ctx
     }
 
     pub fn workspace_root(&self) -> &Path {
         &self.workspace_root
+    }
+
+    /// Extra read-only roots for the file-read tools, parsed once from
+    /// CRAFT_AGENT_READ_ROOTS at construction — fixed for the run.
+    pub fn read_roots(&self) -> &[PathBuf] {
+        &self.read_roots
     }
 
     /// The scrubbed environment a tool child receives, computed per call;

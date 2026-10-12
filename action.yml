@@ -53,6 +53,10 @@ inputs:
     description: owner/name the gh tool's write verbs must target; empty means no write gate.
     required: false
     default: ""
+  read-roots:
+    description: Extra read-only roots for read_file/glob/grep, comma separated, absolute paths; empty defaults to the runner temp directory, "off" disables the feature.
+    required: false
+    default: ""
   version:
     description: Release tag the binary is downloaded from.
     required: false
@@ -137,6 +141,7 @@ runs:
         CRAFT_AGENT_RESULT_WINDOW_TURNS: ${{ inputs.result-window-turns }}
         CRAFT_AGENT_EGRESS_ALLOWLIST: ${{ inputs.egress-allowlist }}
         CRAFT_AGENT_WRITE_REPO: ${{ inputs.write-repo }}
+        CRAFT_AGENT_READ_ROOTS: ${{ inputs.read-roots }}
         CRAFT_AGENT_PROMPT: ${{ inputs.prompt }}
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
@@ -164,6 +169,11 @@ runs:
         git config --global --add safe.directory "$GITHUB_WORKSPACE"
         git config --global user.name "craft-agent"
         git config --global user.email "agent@craft-agent.invalid"
+        case "${CRAFT_AGENT_READ_ROOTS:-}" in
+          "") CRAFT_AGENT_READ_ROOTS="${RUNNER_TEMP}" ;;
+          off) unset CRAFT_AGENT_READ_ROOTS ;;
+        esac
+        export CRAFT_AGENT_READ_ROOTS
         cmd=(craft-agent "$mission" --max-turns "$CRAFT_AGENT_MAX_TURNS"
           --max-tokens "$CRAFT_AGENT_MAX_TOKENS")
         if [ "$mission" = "run" ]; then

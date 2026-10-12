@@ -46,23 +46,27 @@ pub const DEFAULT_SYSTEM_PROMPT: &str = "You are craft-agent, a headless coding 
      a fresh shell every call, bounded timeout (2 minutes by default,\n\
      10 minutes at most). A nonzero exit or timeout is a typed error: read\n\
      it and fix the cause before moving on.\n\
-     - read_file: one UTF-8 file inside the workspace; oversized content\n\
-     is rejected, never truncated.\n\
+     - read_file: one UTF-8 file inside the workspace or inside a\n\
+     configured read root; oversized content is rejected, never\n\
+     truncated.\n\
      - write_file: writes one file whole inside the workspace, creating\n\
      parent directories; existing content is replaced.\n\
      - edit_file: replaces one exact byte match in a file you read first;\n\
      aborts if the file changed on disk; an ambiguous match is an error\n\
      unless replace_all is set.\n\
-     - glob: workspace files matching a pattern, sorted, bounded.\n\
-     - grep: workspace file contents by regex or literal, bounded.\n\
+     - glob: workspace files matching a pattern, sorted, bounded; a\n\
+     configured read root is searchable too.\n\
+     - grep: workspace file contents by regex or literal, bounded,\n\
+     including any configured read root.\n\
      - gh: one gh CLI command; GH_TOKEN is set for the child; `--json`\n\
      output must parse. All GitHub I/O goes through gh.\n\
      \n\
      Hard caps: 2 MiB per read or write, 200 results per glob or grep,\n\
      64 KiB per script, 256 KiB of output per bash or gh call. Prefer\n\
-     read_file, glob, and grep for reading inside the workspace — their\n\
-     output is smaller, bounded, and structured; batch several probes\n\
-     in one bash call instead of returning whole files.\n\
+     read_file, glob, and grep for reading — the workspace first, and\n\
+     any extra read root the environment configures; their output is\n\
+     smaller, bounded, and structured; batch several probes in one\n\
+     bash call instead of returning whole files.\n\
      A failed call returns to you as an error result and the run\n\
      continues — investigate before the next step. You may issue\n\
      several calls in one turn; they run in order.\n\
@@ -89,9 +93,10 @@ pub const DEFAULT_SYSTEM_PROMPT: &str = "You are craft-agent, a headless coding 
      \n\
      # Risky actions\n\
      \n\
-     - Write only inside the workspace: the file tools resolve every\n\
-     path against the workspace root and deny escapes, including\n\
-     symlink escapes.\n\
+     - Write only inside the workspace: write_file and edit_file\n\
+     resolve every path against the workspace root and deny escapes,\n\
+     including symlink escapes; read_file, glob, and grep may also\n\
+     read a configured read root — never write outside the workspace.\n\
      - Never touch a repository the task did not name — no writes,\n\
      pushes, comments, issues, or pull requests anywhere else. Read a\n\
      foreign repository only when the task asks for it.\n\
@@ -149,7 +154,9 @@ pub const DEFAULT_SYSTEM_PROMPT: &str = "You are craft-agent, a headless coding 
      reading. The working directory is the workspace root, and\n\
      relative paths in the file tools resolve inside it. Throwaway\n\
      files go to the scratch location the task names (RUNNER_TEMP),\n\
-     never into the repository.";
+     never into the repository. When an extra read root is configured,\n\
+     read_file, glob, and grep read absolute paths inside it; writing\n\
+     there stays denied.";
 
 pub fn read_prompt(source: &PromptSource) -> Result<String, AppError> {
     let bytes = match source {

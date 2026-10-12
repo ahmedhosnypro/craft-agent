@@ -1,6 +1,10 @@
 //! Workspace path containment and the sensitive-path predicate.
 //!
-//! Sensitive paths are denied on every call: the guard is a pure
+//! Reads may also reach the extra read roots named by
+//! `CRAFT_AGENT_READ_ROOTS` — the workspace is always tried first,
+//! then roots in declaration order, and symlink components resolve
+//! against the matched root, so a link may not stitch roots. Sensitive
+//! paths are denied on every call: the guard is a pure
 //! function of the resolved path, so nothing is cached across calls.
 //! Ban patterns match case-insensitively; the public exemptions
 //! (`.env.example`/`.env.sample`/`.env.template`, `*.pub` keys) require
@@ -25,6 +29,34 @@ fn escapes(path: &str) -> ToolError {
     }
 }
 
+/// The env knob naming extra read-only roots for the file-read tools.
+pub const READ_ROOTS_KNOB: &str = "CRAFT_AGENT_READ_ROOTS";
+
+const MAX_KNOB_BYTES: usize = 4096;
+const MAX_READ_ROOTS: usize = 4;
+
+/// Knob value -> extra read roots. None or empty turns the feature
+/// off; an oversized value grants nothing (fail closed). Entries are
+/// trimmed; empty and non-absolute entries are dropped; at most
+/// MAX_READ_ROOTS survive, in declaration order. A root that does not
+/// exist is tolerated — reads inside it return `NotFound`.
+pub fn parse_read_roots(knob: Option<&str>) -> Vec<PathBuf> {
+    let Some(value) = knob else {
+        return Vec::new();
+    };
+    if value.trim().is_empty() || value.len() > MAX_KNOB_BYTES {
+        return Vec::new();
+    }
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .filter(|entry| Path::new(entry).is_absolute())
+        .map(PathBuf::from)
+        .take(MAX_READ_ROOTS)
+        .collect()
+}
+
 /// Resolve a tool-supplied path against the workspace root, rejecting
 /// lexical escapes, symlink escapes, and dangling symlinks. The
 /// returned path is contained in the root lexically, and every symlink
@@ -39,6 +71,36 @@ pub fn resolve_within(
     let folded = fold_within(tool, &canon_root, input, max_path_bytes)?;
     reject_symlink_escapes(&canon_root, &folded, input)?;
     Ok(folded)
+}
+
+/// Resolve a READ path: a relative input folds against the workspace
+/// root only (`resolve_within`, verbatim); an absolute input may land
+/// in the workspace or a configured read root, tried in that order.
+/// The first containing root wins; its symlink verdict is definitive,
+/// so a link may not stitch roots; a probe outside every root stays
+/// the run-fatal `EscapesWorkspace` denial.
+pub fn resolve_read(
+    tool: &str,
+    workspace: &Path,
+    read_roots: &[PathBuf],
+    input: &str,
+    max_path_bytes: usize,
+) -> Result<PathBuf, ToolError> {
+    if !Path::new(input).is_absolute() {
+        return resolve_within(tool, workspace, input, max_path_bytes);
+    }
+    let candidates = std::iter::once(workspace).chain(read_roots.iter().map(PathBuf::as_path));
+    for root in candidates {
+        let canon_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        let folded = match fold_within(tool, &canon_root, input, max_path_bytes) {
+            Ok(folded) => folded,
+            Err(ToolError::EscapesWorkspace { .. }) => continue,
+            Err(other) => return Err(other),
+        };
+        reject_symlink_escapes(&canon_root, &folded, input)?;
+        return Ok(folded);
+    }
+    Err(escapes(input))
 }
 
 /// Fold the input lexically: `.` drops, `..` pops, and an absolute
@@ -161,11 +223,46 @@ fn is_key_or_token(lower: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::sensitive_reason;
-    use std::path::Path;
+    use super::{parse_read_roots, sensitive_reason};
+    use std::path::{Path, PathBuf};
 
     fn reason(p: &str) -> Option<&'static str> {
         sensitive_reason(Path::new(p))
+    }
+
+    fn roots(raw: &str) -> Vec<PathBuf> {
+        parse_read_roots(Some(raw))
+    }
+
+    #[test]
+    fn parse_read_roots_rows() {
+        assert!(parse_read_roots(None).is_empty());
+        assert!(roots("").is_empty());
+        assert!(roots("   ").is_empty());
+        assert!(roots(",,").is_empty());
+        assert_eq!(
+            roots(" /a , /b ,, sub , "),
+            vec![PathBuf::from("/a"), PathBuf::from("/b")]
+        );
+        assert_eq!(roots("/r1,/r2,/r3").len(), 3);
+        assert_eq!(
+            roots("/r1,/r2,/r3"),
+            vec![
+                PathBuf::from("/r1"),
+                PathBuf::from("/r2"),
+                PathBuf::from("/r3"),
+            ]
+        );
+        assert_eq!(
+            roots("/r1,/r2,/r3,/r4,/r5"),
+            vec![
+                PathBuf::from("/r1"),
+                PathBuf::from("/r2"),
+                PathBuf::from("/r3"),
+                PathBuf::from("/r4"),
+            ]
+        );
+        assert!(roots(&format!("/{}", "x".repeat(4096))).is_empty());
     }
 
     #[test]

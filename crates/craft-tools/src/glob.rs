@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::error::ToolError;
 use crate::event::{self, ToolStream};
-use crate::pathguard::{resolve_within, sensitive_reason};
+use crate::pathguard::{resolve_read, sensitive_reason};
 use crate::schema::{Prop, Schema};
 use crate::tool::{Tool, ToolCtx, ToolLimits};
 use crate::util;
@@ -23,7 +23,7 @@ pub const GLOB_PROPS: &[Prop] = &[
         name: "path",
         ty: Schema::Str,
         required: false,
-        desc: "Directory to search instead of the workspace root; results stay root-relative.",
+        desc: "Directory to search instead of the workspace root; an absolute configured read root also works. Workspace results are root-relative; read-root results are absolute.",
     },
 ];
 
@@ -49,7 +49,13 @@ impl GlobTool {
         let scope_input = util::arg_opt_str(args, "glob", "path", self.limits.max_path_bytes)?
             .unwrap_or_else(|| ".".to_string());
         let root = ctx.workspace_root().to_path_buf();
-        let scope = resolve_within("glob", &root, &scope_input, self.limits.max_path_bytes)?;
+        let scope = resolve_read(
+            "glob",
+            &root,
+            ctx.read_roots(),
+            &scope_input,
+            self.limits.max_path_bytes,
+        )?;
         if let Some(reason) = sensitive_reason(&scope) {
             return Err(ToolError::SensitivePath {
                 path: display(&scope),
@@ -136,7 +142,7 @@ impl Tool for GlobTool {
     }
 
     fn description(&self) -> &'static str {
-        "Lists workspace files matching a glob pattern, sorted, with a bounded result count."
+        "Lists workspace files matching a glob pattern, sorted, with a bounded result count; a configured read root is searchable too."
     }
 
     fn params_schema(&self) -> Schema {

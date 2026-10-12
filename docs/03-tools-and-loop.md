@@ -40,9 +40,10 @@ narrows the set.
 
 `ToolCtx` is the per-run context every tool receives: the workspace
 root, the child-environment source (the real process environment in
-production, an explicit map in the corpora), and the read stamps
-backing `edit_file`'s prior-read and changed-on-disk guards. The
-scrubbed child environment is computed per call, never cached.
+production, an explicit map in the corpora), the read stamps backing
+`edit_file`'s prior-read and changed-on-disk guards, and the extra
+read roots parsed once from `CRAFT_AGENT_READ_ROOTS` and fixed for the
+run. The scrubbed child environment is computed per call, never cached.
 `ToolLimits` bounds every builtin; defaults:
 
 | Limit | Default | Bounds |
@@ -70,11 +71,11 @@ scrubbed child environment is computed per call, never cached.
 | Tool | Purpose and bounds |
 |---|---|
 | `bash` | Runs a bash script in the workspace with closed stdin and a bounded timeout; child output streams as progress; nonzero exits and timeouts are typed errors; the kill sequence is SIGTERM → grace window → SIGKILL. |
-| `read_file` | Reads a UTF-8 text file inside the workspace; content above the size guard is rejected, never truncated. |
+| `read_file` | Reads a UTF-8 text file inside the workspace or a configured read root; content above the size guard is rejected, never truncated. |
 | `write_file` | Writes a full file inside the workspace; missing parent directories are created; the payload is capped. |
 | `edit_file` | Replaces an exact byte match in a previously read file; aborts if the file changed on disk; an ambiguous match is a typed error unless replace-all is requested. |
-| `glob` | Lists workspace files matching a glob pattern, sorted, with a bounded result count. |
-| `grep` | Searches file contents with a regex or literal pattern across the workspace, bounded and sorted. |
+| `glob` | Lists workspace files matching a glob pattern, sorted, with a bounded result count; a configured read root is searchable too. |
+| `grep` | Searches file contents with a regex or literal pattern across the workspace and any configured read roots, bounded and sorted. |
 | `gh` | Runs a gh CLI command with `GH_TOKEN`; all GitHub I/O goes through this tool; `--json` output must parse, and a nonzero exit is a typed error. |
 
 ## Sensitive paths
@@ -84,6 +85,14 @@ root and reject escapes twice: lexically (components fold, and a
 `..` that would leave the root is a typed `EscapesWorkspace` error)
 and through the filesystem (the deepest existing ancestor must
 canonicalize inside the root, so symlink escapes are caught too).
+
+The read tools (`read_file`, `glob`, `grep`) may also reach a root
+named by `CRAFT_AGENT_READ_ROOTS`: absolute inputs try the workspace
+first, then the declared roots in order, and a relative input never
+leaves the workspace. The predicate and the symlink rules apply inside
+those roots unchanged, each against its matched root — a symlink may
+not stitch roots — and the write tools never see the knob:
+`write_file` and `edit_file` stay workspace-only.
 
 The sensitive-path predicate is a pure function of the resolved path,
 checked per call against every component — nothing is cached. It
@@ -115,7 +124,9 @@ to the provider (default 8192), turn caps for the fold, an optional
 idle timeout over a stalled stream, the step-attempt bound (default 3,
 env `CRAFT_AGENT_STEP_RETRIES`), the result-window turn count (default
 20, env `CRAFT_AGENT_RESULT_WINDOW_TURNS`), the workspace root, and
-the session path. Each turn:
+the session path. The tool layer reads `CRAFT_AGENT_READ_ROOTS` from
+the environment once at startup: extra read-only roots for the
+file-read tools. Each turn:
 
 1. The runner builds the next request from the full session record
    plus the registry's cached tool specs, and streams it through the

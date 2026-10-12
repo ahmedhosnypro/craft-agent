@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::error::ToolError;
 use crate::event::{self, ToolStream};
-use crate::pathguard::{resolve_within, sensitive_reason};
+use crate::pathguard::{resolve_read, sensitive_reason};
 use crate::schema::{Prop, Schema};
 use crate::tool::{Tool, ToolCtx, ToolLimits};
 use crate::util;
@@ -24,7 +24,7 @@ pub const GREP_PROPS: &[Prop] = &[
         name: "path",
         ty: Schema::Str,
         required: false,
-        desc: "File or directory to search instead of the workspace root.",
+        desc: "File or directory to search instead of the workspace root; an absolute configured read root also works.",
     },
     Prop {
         name: "glob",
@@ -85,7 +85,13 @@ impl GrepTool {
         let scope_input = util::arg_opt_str(args, "grep", "path", self.limits.max_path_bytes)?
             .unwrap_or_else(|| ".".to_string());
         let root = ctx.workspace_root().to_path_buf();
-        let scope = resolve_within("grep", &root, &scope_input, self.limits.max_path_bytes)?;
+        let scope = resolve_read(
+            "grep",
+            &root,
+            ctx.read_roots(),
+            &scope_input,
+            self.limits.max_path_bytes,
+        )?;
         if let Some(reason) = sensitive_reason(&scope) {
             return Err(ToolError::SensitivePath {
                 path: display(&scope),
@@ -238,7 +244,7 @@ impl Tool for GrepTool {
     }
 
     fn description(&self) -> &'static str {
-        "Searches file contents with a regex or literal pattern across the workspace, bounded and sorted."
+        "Searches file contents with a regex or literal pattern across the workspace and any configured read roots, bounded and sorted."
     }
 
     fn params_schema(&self) -> Schema {

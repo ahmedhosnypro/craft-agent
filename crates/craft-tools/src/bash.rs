@@ -121,7 +121,7 @@ impl Tool for BashTool {
     fn description(&self) -> &'static str {
         "Runs a bash script in the workspace with closed stdin, a bounded timeout, \
          and a 256 KiB output cap; nonzero exits and timeouts are reported as typed \
-         errors. Use it for commands (git, gh, jq), not for reading workspace files — \
+         errors. Use it for commands (git, gh, jq), not for reading files — \
          read_file, glob, and grep are cheaper and structured."
     }
 
