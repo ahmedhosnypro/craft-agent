@@ -54,6 +54,46 @@ jobs:
             echo "${HOME}/.cargo/bin" >> "$GITHUB_PATH"
           fi
           rustup target add "$TARGET"
+      - name: Provision the musl C toolchain
+        run: |
+          set -euo pipefail
+          # openssl-sys probes the target-prefixed gcc name; musl-tools ships
+          # only the musl-gcc wrapper. The ARM runner cannot run musl.cc's
+          # x86_64-hosted cross builds — it gets the aarch64-hosted native one.
+          case "$TARGET" in
+            x86_64-unknown-linux-musl)
+              sudo apt-get update
+              sudo apt-get install -y --no-install-recommends musl-tools
+              sudo ln -sf "$(command -v musl-gcc)" /usr/local/bin/x86_64-linux-musl-gcc
+              ;;
+            aarch64-unknown-linux-musl)
+              url="https://musl.cc/aarch64-linux-musl-native.tgz"
+              if ! (
+                curl --head -fsSL -m 30 "$url" -o /dev/null &&
+                curl -fsSL "$url" -o /tmp/aarch64-musl-native.tgz &&
+                echo "daf336cafa2c3c7daf42f6a46edc960f10a181fcf15ab9f1c43b192e8ad2a069  /tmp/aarch64-musl-native.tgz" |
+                  sha256sum --check --status
+              ); then
+                echo "musl.cc fetch failed — falling back to apt musl-tools"
+                sudo apt-get update
+                sudo apt-get install -y --no-install-recommends musl-tools
+                sudo ln -sf "$(command -v musl-gcc)" /usr/local/bin/aarch64-linux-musl-gcc
+              else
+                sudo mkdir -p /opt/musl-cross
+                sudo tar -xzf /tmp/aarch64-musl-native.tgz -C /opt/musl-cross
+                echo "/opt/musl-cross/aarch64-linux-musl-native/bin" >> "$GITHUB_PATH"
+                export PATH="/opt/musl-cross/aarch64-linux-musl-native/bin:$PATH"
+              fi
+              echo "CC_aarch64_unknown_linux_musl=aarch64-linux-musl-gcc" >> "$GITHUB_ENV"
+              echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-musl-gcc" >> "$GITHUB_ENV"
+              ;;
+          esac
+          musl_cc="${TARGET%%-*}-linux-musl-gcc"
+          command -v "$musl_cc"
+          tmp="$(mktemp -d)"
+          printf 'int main(void){return 0;}\n' > "$tmp/hello.c"
+          "$musl_cc" -static -o "$tmp/hello" "$tmp/hello.c"
+          "$tmp/hello"
       - name: Test
         run: cargo test --workspace
       - name: Build
