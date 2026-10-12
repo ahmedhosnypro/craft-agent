@@ -1,8 +1,10 @@
 # 03 — Tools and the run loop
 
 Tools are typed streams; the loop is turn-bounded. The session record
-is both the wire transcript and the log — model-visible means logged,
-and logged means model-visible.
+is both the wire transcript and the log — everything model-visible is
+logged. The one exception runs one way: result-window trimming stubs
+old tool results out of the assembled prompt while the record keeps
+them verbatim.
 
 ## The Tool trait
 
@@ -30,7 +32,9 @@ description, parameter schema — is computed once at registration and
 cached, so the model sees a stable tool list and request assembly
 reads the cache. `execute(name, args, ctx)` dispatches with the stream
 contract enforced; the run mission mounts the seven builtins through
-`Registry::with_builtins`.
+`Registry::with_builtins`, or a filtered subset when `--agent`
+selects a profile whose `tools` allowlist (minus `disallowedTools`)
+narrows the set.
 
 ## ToolCtx and ToolLimits
 
@@ -109,8 +113,9 @@ pass through in order.
 token budget (default 4 000 000), the per-request output cap forwarded
 to the provider (default 8192), turn caps for the fold, an optional
 idle timeout over a stalled stream, the step-attempt bound (default 3,
-env `CRAFT_AGENT_STEP_RETRIES`), the workspace root, and the session
-path. Each turn:
+env `CRAFT_AGENT_STEP_RETRIES`), the result-window turn count (default
+20, env `CRAFT_AGENT_RESULT_WINDOW_TURNS`), the workspace root, and
+the session path. Each turn:
 
 1. The runner builds the next request from the full session record
    plus the registry's cached tool specs, and streams it through the
@@ -127,11 +132,15 @@ path. Each turn:
    is an error, never success.
 3. Usage is summed into the run total and the assistant turn is
    appended to the session.
-4. A turn with no tool calls ends the run: completed, exit 0.
-5. Otherwise the budget is checked; then the tool calls execute in
-   order — one `tool_call` event, one executed call, one appended
-   `Tool` message and `tool_result` event each — with the stationarity
-   guard observing every executed call.
+4. The budget is checked; a spend at or over the cap ends the run
+   with exit 3 — every turn is charged, including the one that
+   completes the mission, so a final answer cannot silently overshoot
+   the cap.
+5. A turn with no tool calls ends the run: completed, exit 0.
+   Otherwise the tool calls execute in order — one `tool_call` event,
+   one executed call, one appended `Tool` message and `tool_result`
+   event each — with the stationarity guard observing every executed
+   call.
 
 Every ending passes through one `finish` path, so the terminal
 `run_finished` event and the process outcome can never disagree.
@@ -139,10 +148,13 @@ Every ending passes through one `finish` path, so the terminal
 ## Budgets
 
 The budget is a single fail-closed token check between turns, before
-any tool of the next round executes. The run total sums per-turn usage
-with saturating adds (repeats inside one turn were already merged by
-the fold), and the `incomplete` flag ORs across turns. Spent means
-input + output + cache-read + cache-write + reasoning tokens. Two
+any tool of the next round executes and before completion is decided.
+The run total sums per-turn usage with saturating adds (repeats inside
+one turn were already merged by the fold), and the `incomplete` flag
+ORs across turns. Spent means input + output + cache-read +
+cache-write + reasoning tokens — the parser emits disjoint buckets
+that sum to the provider's totals, so the sum is honest and cached
+prefixes still count as real context. Two
 outcomes, both exit 3: the spend reached the budget, or the budget
 cannot be verified because the provider reported incomplete usage — an
 unverifiable budget is never treated as unspent. Replays keep their
@@ -165,12 +177,14 @@ exit 2, with the cancellation category distinguishing it from max-turns.
 
 The session is an append-only JSONL record: one JSON `ChatMessage` per
 line, appended once and never rewritten. Opening a record loads it
-verbatim, so a resumed run replays the exact transcript the model saw.
+verbatim, so a resumed run rebuilds the prompt from the full record
+under the same result-window rule.
 Loading is fail-closed: a blank line, an unparsable line, a line over
 4 MiB, or a file over 64 MiB is a typed error naming the line. The
-invariant is structural — the next request is exactly the session's
-message list, so nothing reaches the model without being logged, and
-nothing is logged that did not reach the model. A run without a
+invariant is structural — the next request is the session's message
+list with results older than the window stubbed, so nothing reaches
+the model without being logged, and nothing is logged that did not
+reach the model. A run without a
 session path keeps the transcript in memory only.
 
 ## The NDJSON event stream
