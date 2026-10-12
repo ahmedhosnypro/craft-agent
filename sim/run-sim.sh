@@ -56,7 +56,14 @@ helpers_sha="$(awk -v asset="craft-helpers-${triple}" '$2 == asset {print $1; ex
 [ -n "$agent_sha" ] || fail "no checksums.txt entry for craft-agent-${triple}"
 [ -n "$helpers_sha" ] || fail "no checksums.txt entry for craft-helpers-${triple}"
 
-run_dir="$repo_root/sim/runs/$(date +%Y%m%d-%H%M%S)"
+base="$repo_root/sim/runs/$(date +%Y%m%d-%H%M%S)"
+run_dir="$base"
+n=0
+# mkdir is the lock: concurrent launches in the same second get a suffix.
+while ! mkdir "$run_dir" 2>/dev/null; do
+  n=$((n + 1))
+  run_dir="${base}-${n}"
+done
 mkdir -p "$run_dir/workspace" "$run_dir/out" "$run_dir/tmp"
 
 # The manifest describes the run host-side; no key or token ever lands in it.
@@ -129,6 +136,10 @@ docker run --rm --network host \
   -e OPENAI_BASE_URL \
   -e CRAFT_AGENT_MAX_TURNS="${CRAFT_AGENT_MAX_TURNS:-40}" \
   -e CRAFT_AGENT_MAX_TOKENS="${CRAFT_AGENT_MAX_TOKENS:-4000000}" \
+  -e CRAFT_AGENT_STEP_RETRIES \
+  -e CRAFT_AGENT_RESULT_WINDOW_TURNS \
+  -e CRAFT_AGENT_EGRESS_ALLOWLIST \
+  -e CRAFT_AGENT_WRITE_REPO \
   -e CRAFT_AGENT_PROMPT_FILE="/tasks/${task}.md" \
   -e SIM_HOST_UID="$(id -u)" \
   -e SIM_HOST_GID="$(id -g)" \
