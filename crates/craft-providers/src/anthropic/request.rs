@@ -1,21 +1,36 @@
 //! Neutral-to-wire request encoding for the Messages dialect: top-level
-//! system, required max_tokens, block-shaped turns, and verbatim replay
-//! of native blocks.
+//! system, required max_tokens, block-shaped turns, verbatim replay of
+//! native blocks, image attachments, sampling knobs, tool choice, id
+//! sanitation, the family max_tokens ceiling, and the cache-breakpoint
+//! pass.
 
 use craft_core::error::ProviderError;
-use craft_core::types::{ChatMessage, ModelRequest, NativeBlocks, NativeDialect, ToolCall};
+use craft_core::types::{
+    ChatMessage, ImagePart, ModelRequest, NativeBlocks, NativeDialect, Sampling, ToolCall,
+    ToolChoice,
+};
 use serde_json::Value;
 
-/// Neutral request to documented messages JSON. No temperature rides
-/// the body; the dialect deprecated it.
+use super::caching;
+use super::ceiling;
+use super::ids::IdMap;
+use super::images;
+
+/// Neutral request to documented messages JSON; sampling and tool
+/// choice ride only when the caller asked for them.
 pub(super) fn encode(request: &ModelRequest, model: &str) -> Result<Value, ProviderError> {
+    let mut id_map = IdMap::new();
     let mut messages: Vec<Value> = Vec::new();
     let mut results: Vec<Value> = Vec::new();
     for message in &request.messages {
         match message {
-            ChatMessage::User { text, .. } => {
+            ChatMessage::User {
+                text,
+                images: attached,
+            } => {
                 flush_results(&mut messages, &mut results);
-                messages.push(serde_json::json!({"role": "user", "content": text}));
+                let content = images::with_images(text, attached)?;
+                messages.push(serde_json::json!({"role": "user", "content": content}));
             }
             ChatMessage::Assistant {
                 text,
@@ -23,21 +38,31 @@ pub(super) fn encode(request: &ModelRequest, model: &str) -> Result<Value, Provi
                 native_blocks,
             } => {
                 flush_results(&mut messages, &mut results);
-                messages.push(encode_assistant(text, tool_calls, native_blocks)?);
+                messages.push(encode_assistant(
+                    text,
+                    tool_calls,
+                    native_blocks,
+                    &mut id_map,
+                )?);
             }
             ChatMessage::Tool {
                 call_id,
                 content,
                 is_error,
-                ..
-            } => results.push(tool_result_block(call_id, content, *is_error)),
+                images: attached,
+            } => results.push(tool_result_block(
+                &id_map.resolve(call_id),
+                content,
+                *is_error,
+                attached,
+            )?),
         }
     }
     flush_results(&mut messages, &mut results);
     let mut body = serde_json::json!({
         "model": model,
         "messages": messages,
-        "max_tokens": request.max_tokens,
+        "max_tokens": ceiling::effective_max_tokens(model, request.max_tokens),
         "stream": true,
     });
     if let Some(system) = request
@@ -48,20 +73,12 @@ pub(super) fn encode(request: &ModelRequest, model: &str) -> Result<Value, Provi
         object_mut(&mut body)?.insert(String::from("system"), Value::String(system.to_owned()));
     }
     if !request.tools.is_empty() {
-        let tools: Vec<Value> = request
-            .tools
-            .iter()
-            .map(|tool| {
-                serde_json::json!({
-                    "name": tool.name,
-                    "description": tool.description,
-                    "input_schema": tool.parameters,
-                })
-            })
-            .collect();
-        let map = object_mut(&mut body)?;
-        map.insert(String::from("tools"), Value::Array(tools));
+        encode_tools(&mut body, request)?;
     }
+    if let Some(sampling) = &request.sampling {
+        encode_sampling(&mut body, sampling)?;
+    }
+    caching::apply(&mut body);
     Ok(body)
 }
 
@@ -71,6 +88,7 @@ fn encode_assistant(
     text: &str,
     tool_calls: &[ToolCall],
     native_blocks: &Option<NativeBlocks>,
+    id_map: &mut IdMap,
 ) -> Result<Value, ProviderError> {
     let mut content: Vec<Value> = Vec::new();
     if let Some(blocks) = native_blocks {
@@ -93,7 +111,7 @@ fn encode_assistant(
         content.push(serde_json::json!({"type": "text", "text": text}));
     }
     for call in tool_calls {
-        content.push(tool_use_block(call)?);
+        content.push(tool_use_block(call, id_map)?);
     }
     if content.is_empty() {
         return Err(ProviderError::InvalidRequest {
@@ -105,7 +123,7 @@ fn encode_assistant(
 
 /// One tool call: the neutral arguments text is raw JSON, so it parses
 /// into the input object the wire requires.
-fn tool_use_block(call: &ToolCall) -> Result<Value, ProviderError> {
+fn tool_use_block(call: &ToolCall, id_map: &mut IdMap) -> Result<Value, ProviderError> {
     let input = if call.arguments.is_empty() {
         serde_json::json!({})
     } else {
@@ -122,10 +140,63 @@ fn tool_use_block(call: &ToolCall) -> Result<Value, ProviderError> {
     };
     Ok(serde_json::json!({
         "type": "tool_use",
-        "id": call.id,
+        "id": id_map.assign(&call.id),
         "name": call.name,
         "input": input,
     }))
+}
+
+/// Tool definitions and the choice knob, which rides only with tools.
+fn encode_tools(body: &mut Value, request: &ModelRequest) -> Result<(), ProviderError> {
+    let tools: Vec<Value> = request
+        .tools
+        .iter()
+        .map(|tool| {
+            serde_json::json!({
+                "name": tool.name,
+                "description": tool.description,
+                "input_schema": tool.parameters,
+            })
+        })
+        .collect();
+    let map = object_mut(body)?;
+    map.insert(String::from("tools"), Value::Array(tools));
+    if let Some(choice) = &request.tool_choice {
+        let choice = match choice {
+            ToolChoice::Auto => serde_json::json!({"type": "auto"}),
+            ToolChoice::Any => serde_json::json!({"type": "any"}),
+            ToolChoice::Tool { name } => serde_json::json!({"type": "tool", "name": name}),
+        };
+        map.insert(String::from("tool_choice"), choice);
+    }
+    Ok(())
+}
+
+/// Finite temperature and top_p as JSON numbers, and stop sequences
+/// only when set; anything else keeps the provider default.
+fn encode_sampling(body: &mut Value, sampling: &Sampling) -> Result<(), ProviderError> {
+    for (field, value) in [
+        ("temperature", sampling.temperature),
+        ("top_p", sampling.top_p),
+    ] {
+        if let Some(value) = value {
+            if !value.is_finite() {
+                return Err(ProviderError::InvalidRequest {
+                    detail: format!("{field} must be a finite number"),
+                });
+            }
+            object_mut(body)?.insert(String::from(field), serde_json::json!(value));
+        }
+    }
+    if !sampling.stop_sequences.is_empty() {
+        let stops: Vec<Value> = sampling
+            .stop_sequences
+            .iter()
+            .map(|sequence| Value::String(sequence.clone()))
+            .collect();
+        object_mut(body)?.insert(String::from("stop_sequences"), Value::Array(stops));
+    }
+    Ok(())
 }
 
 /// Consecutive tool results ride as one user message of tool_result
@@ -143,16 +214,21 @@ fn flush_results(messages: &mut Vec<Value>, results: &mut Vec<Value>) {
 
 /// Every tool_use gets a tool_result, even a rejected or cancelled one;
 /// the error flag marks rows the tool layer refused.
-fn tool_result_block(call_id: &str, content: &str, is_error: bool) -> Value {
+fn tool_result_block(
+    call_id: &str,
+    content: &str,
+    is_error: bool,
+    attached: &[ImagePart],
+) -> Result<Value, ProviderError> {
     let mut block = serde_json::json!({
         "type": "tool_result",
         "tool_use_id": call_id,
-        "content": content,
+        "content": images::with_images(content, attached)?,
     });
     if let Some(map) = block.as_object_mut().filter(|_| is_error) {
         map.insert(String::from("is_error"), Value::Bool(true));
     }
-    block
+    Ok(block)
 }
 
 fn object_mut(value: &mut Value) -> Result<&mut serde_json::Map<String, Value>, ProviderError> {

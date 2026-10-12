@@ -40,23 +40,29 @@ Four shapes recur across every corpus:
 
 ## Live corpora
 
-Six `#[ignore]`d corpora ride a real endpoint through the repo-root
-gitignored `.env`; none is part of `just check`. All live lanes ride the
-OpenAI-compatible seam; Gemini is fixtures-only in v1.
+Seven `#[ignore]`d corpora ride a real endpoint through the repo-root
+gitignored `.env`; none is part of `just check`. Six ride the
+OpenAI-compatible seam; the Anthropic corpus rides the Messages seam
+through its own knob trio; Gemini is fixtures-only in v1.
 
 - `just integration` — completions round-trip
 - `just integration_tools` — tool round-trip
 - `just integration_stream_tools` — streamed tool-delta assembly
 - `just integration_auth` — a bad key lands a typed error
 - `just integration_dialect_mount` — dialect mount over one base URL
+- `just integration_anthropic` — Anthropic Messages: streamed turn,
+  forced tool call, bad-key auth
 - `just integration_agent_loop` — the full agent loop: real turn, tool
   dispatch, terminal record
 
 The knobs are a trio — `TEST_BYOK_BASE_URL`, `TEST_BYOK_API_KEY`,
 `TEST_BYOK_MODEL` — loaded by `craft-providers/tests/byok_env.rs`, which
 every corpus binary mounts via `#[path]`: process env wins, then a walk
-up from the crate manifest to the repo `.env`. Names are printable;
-values never are.
+up from the crate manifest to the repo `.env`. The Anthropic corpus
+carries its own trio through the same loader —
+`TEST_BYOK_ANTHROPIC_BASE_URL`, `TEST_BYOK_ANTHROPIC_API_KEY`,
+`TEST_BYOK_ANTHROPIC_MODEL` — and its SKIP line names the first missing
+knob. Names are printable; values never are.
 
 The skip idiom, verbatim from `byok_env.rs` — the test mounts the loader
 and asks for the trio; missing keys print the SKIP line and pass:
@@ -121,7 +127,7 @@ What the non-compiler stages enforce:
 `.github/workflows/ci.yml` runs the thirteen gate stages verbatim — hosted
 runners lack `just`, so the workflow spells each command out, and every
 gate change lands in the justfile and the workflow in the same commit
-(the lockstep law). CI then runs the six live corpora as plain
+(the lockstep law). CI then runs the seven live corpora as plain
 `--ignored` test invocations: the runner carries no `.env`, so each
 prints its SKIP line and passes, and the same corpora pass for real
 wherever a `.env` exists.

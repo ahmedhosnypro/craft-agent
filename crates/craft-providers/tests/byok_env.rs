@@ -1,5 +1,7 @@
 // Shared TEST_BYOK_* loader for the live corpora; each corpus binary mounts
-// this file via #[path]. Names are printable; values never are.
+// this file via #[path]. Names are printable; values never are. A corpus
+// binary uses only its own trio, so the other loader rides dead.
+#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 
@@ -92,6 +94,23 @@ pub fn test_keys() -> Option<TestKeys> {
     })
 }
 
+// One knob: the value, or the knob's name when missing or empty.
+fn knob(var: &'static str) -> Result<String, &'static str> {
+    read_var(var).filter(|value| !value.is_empty()).ok_or(var)
+}
+
+// The Anthropic trio, or the name of the first missing or empty knob.
+pub fn anthropic_keys() -> Result<TestKeys, &'static str> {
+    let base_url = knob("TEST_BYOK_ANTHROPIC_BASE_URL")?;
+    let api_key = knob("TEST_BYOK_ANTHROPIC_API_KEY")?;
+    let model = knob("TEST_BYOK_ANTHROPIC_MODEL")?;
+    Ok(TestKeys {
+        base_url,
+        api_key,
+        model,
+    })
+}
+
 // Yields TestKeys, or prints the SKIP line and early-returns Ok from the test.
 #[macro_export]
 macro_rules! require_keys {
@@ -101,6 +120,24 @@ macro_rules! require_keys {
             None => {
                 eprintln!(
                     "SKIP: TEST_BYOK_* are not set (no .env) — the live {} corpus is off",
+                    $corpus
+                );
+                return Ok(());
+            }
+        }
+    };
+}
+
+// Yields the Anthropic TestKeys, or names the missing knob (never its
+// value) in the SKIP line and early-returns Ok from the test.
+#[macro_export]
+macro_rules! require_anthropic_keys {
+    ($corpus:expr) => {
+        match $crate::byok_env::anthropic_keys() {
+            Ok(keys) => keys,
+            Err(var) => {
+                eprintln!(
+                    "SKIP: {var} is not set (no .env) — the live {} corpus is off",
                     $corpus
                 );
                 return Ok(());

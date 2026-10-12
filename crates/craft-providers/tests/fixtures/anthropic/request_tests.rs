@@ -1,15 +1,17 @@
 //! Request encoding: the neutral request maps to the documented
-//! Messages JSON — top-level system, required max_tokens, Bearer auth,
-//! the version header, and no temperature.
+//! Messages JSON — top-level system, required max_tokens, the
+//! x-api-key auth header, the version header, and sampling only when
+//! requested.
 
 use crate::mock::{CannedResponse, MockServer};
 use crate::wire;
-use crate::{KEY, MODEL, TestError, provider, replay_request, run, sample_request, tool_spec};
+use crate::{KEY, TestError, provider, replay_request, run, sample_request, tool_spec};
 use craft_core::error::ProviderError;
-use craft_core::types::{ChatMessage, NativeBlocks, NativeDialect};
+use craft_core::types::{ChatMessage, ModelRequest, NativeBlocks, NativeDialect};
+use craft_providers::anthropic::AnthropicProvider;
 use serde_json::Value;
 
-async fn serve_stream() -> Result<MockServer, TestError> {
+pub(crate) async fn serve_stream() -> Result<MockServer, TestError> {
     let server = MockServer::start(
         vec![CannedResponse::sse(wire::text_stream().as_bytes())],
         "",
@@ -18,12 +20,32 @@ async fn serve_stream() -> Result<MockServer, TestError> {
     Ok(server)
 }
 
-async fn captured_body(request_body: String) -> Result<Value, TestError> {
+pub(crate) async fn captured_body(request_body: String) -> Result<Value, TestError> {
     Ok(serde_json::from_str(&request_body)?)
 }
 
+/// The captured request body for one encoded request, mounted over
+/// the given model id.
+pub(crate) async fn body_for(request: ModelRequest, model: &str) -> Result<Value, TestError> {
+    let server = serve_stream().await?;
+    let mounted = AnthropicProvider::new(&server.base_url, model, KEY)
+        .map_err(|err| Box::new(err) as TestError)?;
+    let _ = run(&mounted, request).await;
+    let captured = server.request(0).ok_or("the adapter must send a request")?;
+    captured_body(captured.body).await
+}
+
+/// The surfaced typed error when encoding rejects a request before it
+/// leaves the adapter.
+pub(crate) async fn rejected(request: ModelRequest) -> Result<ProviderError, TestError> {
+    let server = serve_stream().await?;
+    let events = run(&provider(&server.base_url)?, request).await;
+    assert_eq!(server.request_count(), 0, "no request leaves the adapter");
+    crate::surfaced(&events)
+}
+
 #[tokio::test]
-async fn request_carries_path_bearer_version_and_documented_body() -> Result<(), TestError> {
+async fn request_carries_path_api_key_version_and_documented_body() -> Result<(), TestError> {
     let server = serve_stream().await?;
     let events = run(&provider(&server.base_url)?, sample_request()).await;
     assert!(
@@ -34,9 +56,11 @@ async fn request_carries_path_bearer_version_and_documented_body() -> Result<(),
     assert_eq!(request.method, "POST");
     assert_eq!(request.path, "/v1/messages");
     assert_eq!(
-        request.headers.get("authorization"),
-        Some(&format!("Bearer {KEY}"))
+        request.headers.get("x-api-key"),
+        Some(&String::from(KEY)),
+        "the documented header is the default scheme"
     );
+    assert!(!request.headers.contains_key("authorization"));
     assert_eq!(
         request.headers.get("anthropic-version"),
         Some(&String::from("2023-06-01"))
@@ -48,16 +72,28 @@ async fn request_carries_path_bearer_version_and_documented_body() -> Result<(),
     let body = captured_body(request.body).await?;
     assert_eq!(
         body,
-        serde_json::json!({
-            "model": MODEL,
-            "system": "You are a digest agent.",
-            "messages": [
-                {"role": "user", "content": "Summarize the merged PRs."}
-            ],
-            "max_tokens": 128,
-            "stream": true
-        }),
-        "exact body equality holds temperature and stray fields out"
+        wire::sample_body(),
+        "exact body equality holds stray fields out"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn bearer_scheme_rides_the_authorization_header() -> Result<(), TestError> {
+    let server = serve_stream().await?;
+    let provider = provider(&server.base_url)?
+        .with_auth_scheme(craft_providers::anthropic::AuthScheme::Bearer);
+    let events = run(&provider, sample_request()).await;
+    assert!(!events.is_empty());
+    let request = server.request(0).ok_or("the adapter must send a request")?;
+    assert!(!request.headers.contains_key("x-api-key"));
+    assert_eq!(
+        request.headers.get("authorization"),
+        Some(&format!("Bearer {KEY}"))
+    );
+    assert_eq!(
+        request.headers.get("anthropic-version"),
+        Some(&String::from("2023-06-01"))
     );
     Ok(())
 }

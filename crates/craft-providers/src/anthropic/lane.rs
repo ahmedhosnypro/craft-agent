@@ -1,6 +1,7 @@
 //! The Messages decode lane: named SSE events dispatch onto the block
 //! registry, the terminal buffers while usage frames merge, and exactly
 //! one TurnFinished leaves the lane when the wire finishes.
+//! Provider-native thinking blocks accumulate for replay as native events.
 
 use std::collections::BTreeMap;
 
@@ -8,11 +9,11 @@ use craft_core::error::ProviderError;
 use craft_core::events::ModelEvent;
 use craft_core::provider::ModelEventStream;
 use craft_core::sse::{SseEvent, SseOptions};
-use craft_core::types::StopReason;
+use craft_core::types::{NativeDialect, StopReason};
 
 use super::chunk::{
-    WireBlockDelta, WireBlockStart, WireBlockStop, WireErrorEnvelope, WireMessageDelta,
-    WireMessageStart,
+    NativeAccum, NativeEmit, WireBlockDelta, WireBlockStart, WireBlockStop, WireErrorEnvelope,
+    WireMessageDelta, WireMessageStart,
 };
 use super::map_error_envelope;
 use crate::lane_driver::{LaneCommon, LaneDialect, mount};
@@ -20,6 +21,9 @@ use crate::lane_driver::{LaneCommon, LaneDialect, mount};
 /// Bound on blocks open at once; a hostile run of never-stopped starts
 /// is a typed failure, not unbounded growth.
 const MAX_OPEN_BLOCKS: usize = 256;
+
+/// Bound on thinking and signature text held per open native block.
+const MAX_NATIVE_ACCUM_BYTES: usize = 1024 * 1024;
 
 /// Mounts the decode lane over one connected response.
 pub(super) fn lane_stream(response: reqwest::Response, sse: SseOptions) -> ModelEventStream {
@@ -32,6 +36,7 @@ pub(super) fn lane_stream(response: reqwest::Response, sse: SseOptions) -> Model
 enum Block {
     Text,
     Tool,
+    Native,
     Other,
 }
 
@@ -39,6 +44,7 @@ enum Block {
 #[derive(Debug, Default)]
 pub(super) struct Registry {
     blocks: BTreeMap<u64, Block>,
+    natives: BTreeMap<u64, NativeAccum>,
 }
 
 impl LaneDialect for Registry {
@@ -85,6 +91,9 @@ fn error_event(data: &str) -> Result<bool, ProviderError> {
     }
 }
 
+/// A stop closes its block; a native block emits its reconstructed wire
+/// shape as one native event, an empty thinking block is a legal skip,
+/// and a redacted block without data is a typed failure.
 fn block_stop(
     data: &str,
     registry: &mut Registry,
@@ -94,7 +103,21 @@ fn block_stop(
         Ok(frame) => frame,
         Err(err) => return common.anomaly(format!("invalid event JSON: {err}")),
     };
+    let native = registry.natives.remove(&frame.index);
     registry.blocks.remove(&frame.index);
+    let Some(accum) = native else {
+        return Ok(false);
+    };
+    match accum.emit() {
+        NativeEmit::Block(block) => common.push_pending(ModelEvent::NativeBlock {
+            dialect: NativeDialect::Anthropic,
+            block,
+        }),
+        NativeEmit::Anomaly(detail) => {
+            return common.anomaly(format!("{detail} at index {}", frame.index));
+        }
+        NativeEmit::Skip => {}
+    }
     Ok(false)
 }
 
@@ -113,7 +136,8 @@ fn message_delta(data: &str, common: &mut LaneCommon) -> Result<bool, ProviderEr
 }
 
 /// A block header registers the index: tool_use heads emit the call's
-/// id and name at once, text and other block kinds register silently.
+/// id and name at once, native heads open an accumulator, and the rest
+/// register silently.
 fn block_start(
     data: &str,
     registry: &mut Registry,
@@ -131,33 +155,39 @@ fn block_start(
     if !registry.blocks.contains_key(&frame.index) && registry.blocks.len() >= MAX_OPEN_BLOCKS {
         return common.anomaly(format!("open content blocks exceeded {MAX_OPEN_BLOCKS}"));
     }
-    if kind == Some("tool_use") {
-        registry.blocks.insert(frame.index, Block::Tool);
-        common.push_pending(ModelEvent::ToolCallDelta {
-            index: frame.index,
-            id: block
-                .get("id")
-                .and_then(serde_json::Value::as_str)
-                .map(String::from),
-            name: block
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .map(String::from),
-            arguments: String::new(),
-        });
-    } else {
-        let registered = if kind == Some("text") {
-            Block::Text
-        } else {
-            Block::Other
-        };
-        registry.blocks.insert(frame.index, registered);
+    match kind {
+        Some("tool_use") => {
+            registry.blocks.insert(frame.index, Block::Tool);
+            common.push_pending(ModelEvent::ToolCallDelta {
+                index: frame.index,
+                id: wire_field(&block, "id"),
+                name: wire_field(&block, "name"),
+                arguments: String::new(),
+            });
+        }
+        Some(kind @ ("thinking" | "redacted_thinking")) => {
+            registry.blocks.insert(frame.index, Block::Native);
+            registry
+                .natives
+                .insert(frame.index, NativeAccum::from_header(kind, &block));
+        }
+        Some("text") => {
+            registry.blocks.insert(frame.index, Block::Text);
+        }
+        _ => {
+            registry.blocks.insert(frame.index, Block::Other);
+        }
     }
     Ok(false)
 }
 
+/// One string field of a block header, as an owned string.
+fn wire_field(block: &serde_json::Value, key: &str) -> Option<String> {
+    Some(block.get(key)?.as_str()?.to_owned())
+}
+
 /// One delta lands on its registered block: text surfaces, tool input
-/// fragments through, thinking and future kinds never surface.
+/// fragments through, native thinking text accumulates for replay.
 fn block_delta(
     data: &str,
     registry: &mut Registry,
@@ -174,9 +204,69 @@ fn block_delta(
     match delta.get("type").and_then(serde_json::Value::as_str) {
         Some("text_delta") => push_text(common, registry, frame.index, &delta)?,
         Some("input_json_delta") => push_input(common, registry, frame.index, &delta)?,
+        Some(kind @ ("thinking_delta" | "signature_delta")) => {
+            return push_native_delta(common, registry, frame.index, &delta, kind);
+        }
         _ => {}
     }
     Ok(false)
+}
+
+/// One thinking or signature delta accumulates on its native block
+/// under the per-block cap; it never surfaces as text.
+fn push_native_delta(
+    common: &mut LaneCommon,
+    registry: &mut Registry,
+    index: u64,
+    delta: &serde_json::Value,
+    kind: &str,
+) -> Result<bool, ProviderError> {
+    ensure_pre_terminal(common)?;
+    let field = kind.strip_suffix("_delta").unwrap_or("thinking");
+    let Some(fragment) = delta.get(field).and_then(serde_json::Value::as_str) else {
+        return Err(ProviderError::Transport {
+            detail: format!("{kind} without its {field} string"),
+        });
+    };
+    let Some(accum) = registry.natives.get_mut(&index) else {
+        return Err(ProviderError::Transport {
+            detail: format!("{kind} on a non-native block at index {index}"),
+        });
+    };
+    let NativeAccum::Thinking {
+        thinking,
+        signature,
+    } = accum
+    else {
+        return Err(ProviderError::Transport {
+            detail: format!("{kind} on a redacted block at index {index}"),
+        });
+    };
+    let held = thinking
+        .len()
+        .saturating_add(signature.len())
+        .saturating_add(fragment.len());
+    if held > MAX_NATIVE_ACCUM_BYTES {
+        return common.anomaly(format!(
+            "native block at index {index} exceeded {MAX_NATIVE_ACCUM_BYTES} bytes"
+        ));
+    }
+    if kind == "signature_delta" {
+        signature.push_str(fragment);
+    } else {
+        thinking.push_str(fragment);
+    }
+    Ok(false)
+}
+
+/// Deltas are content: after the terminal the stream is corrupt.
+fn ensure_pre_terminal(common: &LaneCommon) -> Result<(), ProviderError> {
+    if common.terminal().is_none() {
+        return Ok(());
+    }
+    Err(ProviderError::Transport {
+        detail: String::from("content delta arrived after the terminal"),
+    })
 }
 
 fn push_text(
@@ -185,11 +275,7 @@ fn push_text(
     index: u64,
     delta: &serde_json::Value,
 ) -> Result<(), ProviderError> {
-    if common.terminal().is_some() {
-        return Err(ProviderError::Transport {
-            detail: String::from("content delta arrived after the terminal"),
-        });
-    }
+    ensure_pre_terminal(common)?;
     let Some(text) = delta.get("text").and_then(serde_json::Value::as_str) else {
         return Err(ProviderError::Transport {
             detail: String::from("text delta without text"),
@@ -217,11 +303,7 @@ fn push_input(
     index: u64,
     delta: &serde_json::Value,
 ) -> Result<(), ProviderError> {
-    if common.terminal().is_some() {
-        return Err(ProviderError::Transport {
-            detail: String::from("content delta arrived after the terminal"),
-        });
-    }
+    ensure_pre_terminal(common)?;
     let Some(partial) = delta
         .get("partial_json")
         .and_then(serde_json::Value::as_str)

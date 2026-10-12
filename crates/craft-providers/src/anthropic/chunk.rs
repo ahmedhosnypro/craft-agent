@@ -1,6 +1,7 @@
 //! Wire decode shapes for the named Messages events: usage frames, block
-//! headers, and error envelopes, with every field optional so a hostile
-//! or future-shaped frame never panics the decode.
+//! headers, error envelopes, and native block reconstruction, with every
+//! field optional so a hostile or future-shaped frame never panics the
+//! decode.
 
 use craft_core::types::Usage;
 use serde::Deserialize;
@@ -78,6 +79,78 @@ pub(super) struct WireBlockDelta {
 #[derive(Debug, Deserialize)]
 pub(super) struct WireBlockStop {
     pub index: u64,
+}
+
+/// The native accumulator at one open wire index: thinking text and
+/// signature append from their deltas, a redacted block carries only
+/// the data of its start frame.
+#[derive(Debug)]
+pub(super) enum NativeAccum {
+    Thinking { thinking: String, signature: String },
+    Redacted { data: String },
+}
+
+/// The outcome of closing one native block.
+#[derive(Debug)]
+pub(super) enum NativeEmit {
+    Block(Value),
+    Skip,
+    Anomaly(String),
+}
+
+impl NativeAccum {
+    /// A block header's starting accumulator; only thinking and
+    /// redacted_thinking heads open one.
+    pub(super) fn from_header(kind: &str, block: &Value) -> Self {
+        if kind == "redacted_thinking" {
+            return Self::Redacted {
+                data: block
+                    .get("data")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+            };
+        }
+        Self::Thinking {
+            thinking: String::new(),
+            signature: String::new(),
+        }
+    }
+
+    /// The reconstructed wire block at the stop: the native event's
+    /// payload, a legal skip for an empty block, or the anomaly detail
+    /// for a redacted block without data.
+    pub(super) fn emit(self) -> NativeEmit {
+        match self {
+            Self::Thinking {
+                thinking,
+                signature,
+            } => {
+                if thinking.is_empty() && signature.is_empty() {
+                    return NativeEmit::Skip;
+                }
+                let block = if signature.is_empty() {
+                    serde_json::json!({"type": "thinking", "thinking": thinking})
+                } else {
+                    serde_json::json!({
+                        "type": "thinking",
+                        "thinking": thinking,
+                        "signature": signature,
+                    })
+                };
+                NativeEmit::Block(block)
+            }
+            Self::Redacted { data } => {
+                if data.is_empty() {
+                    return NativeEmit::Anomaly(String::from("redacted block without data"));
+                }
+                NativeEmit::Block(serde_json::json!({
+                    "type": "redacted_thinking",
+                    "data": data,
+                }))
+            }
+        }
+    }
 }
 
 /// message_delta: the terminal frame — stop reason and cumulative usage.

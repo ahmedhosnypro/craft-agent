@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use craft_app::AppError;
 use craft_app::config::{EnvMap, ProviderKind, mount_backend, resolve_env_config};
+use craft_providers::anthropic::AuthScheme;
 
 fn env(pairs: &[(&str, &str)]) -> EnvMap {
     pairs
@@ -89,6 +90,66 @@ fn anthropic_resolves_with_its_key() {
     assert_eq!(cfg.provider, ProviderKind::Anthropic);
     assert_eq!(cfg.api_key, "ak-test");
     assert_eq!(cfg.base_url, "https://api.anthropic.com");
+    assert_eq!(cfg.anthropic_auth, AuthScheme::ApiKey);
+}
+
+#[test]
+fn anthropic_base_url_env_overrides_default() {
+    let e = env(&[
+        ("CRAFT_AGENT_PROVIDER", "anthropic"),
+        ("CRAFT_AGENT_MODEL", "m"),
+        ("ANTHROPIC_API_KEY", "k"),
+        ("ANTHROPIC_BASE_URL", "http://localhost:8080"),
+    ]);
+    let cfg = resolve_env_config(&e).expect("anthropic resolves with custom base url");
+    assert_eq!(cfg.base_url, "http://localhost:8080");
+}
+
+#[test]
+fn anthropic_auth_bearer_mounts_the_bearer_scheme() {
+    let e = env(&[
+        ("CRAFT_AGENT_PROVIDER", "anthropic"),
+        ("CRAFT_AGENT_MODEL", "m"),
+        ("ANTHROPIC_API_KEY", "k"),
+        ("ANTHROPIC_AUTH", "bearer"),
+    ]);
+    let cfg = resolve_env_config(&e).expect("bearer is a legal knob value");
+    assert_eq!(cfg.anthropic_auth, AuthScheme::Bearer);
+}
+
+#[test]
+fn anthropic_auth_x_api_key_or_unset_defaults_to_the_header_scheme() {
+    for value in ["x-api-key", ""] {
+        let e = env(&[
+            ("CRAFT_AGENT_PROVIDER", "anthropic"),
+            ("CRAFT_AGENT_MODEL", "m"),
+            ("ANTHROPIC_API_KEY", "k"),
+            ("ANTHROPIC_AUTH", value),
+        ]);
+        let cfg = resolve_env_config(&e).expect("x-api-key and empty keep the default");
+        assert_eq!(cfg.anthropic_auth, AuthScheme::ApiKey);
+    }
+    let e = env(&[
+        ("CRAFT_AGENT_PROVIDER", "anthropic"),
+        ("CRAFT_AGENT_MODEL", "m"),
+        ("ANTHROPIC_API_KEY", "k"),
+    ]);
+    let cfg = resolve_env_config(&e).expect("unset keeps the default");
+    assert_eq!(cfg.anthropic_auth, AuthScheme::ApiKey);
+}
+
+#[test]
+fn anthropic_auth_unknown_value_is_a_named_error() {
+    let e = env(&[
+        ("CRAFT_AGENT_PROVIDER", "anthropic"),
+        ("CRAFT_AGENT_MODEL", "m"),
+        ("ANTHROPIC_API_KEY", "k"),
+        ("ANTHROPIC_AUTH", "token"),
+    ]);
+    let err = resolve_env_config(&e).expect_err("an unknown scheme must fail");
+    assert!(matches!(err, AppError::InvalidAuth { ref value } if value == "token"));
+    assert!(err.to_string().contains("ANTHROPIC_AUTH"));
+    assert!(err.to_string().contains("token"));
 }
 
 #[test]

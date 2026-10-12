@@ -1,5 +1,8 @@
 //! Recorded Anthropic Messages wire shapes: named SSE events and error
-//! bodies, composed into streams the corpus serves off loopback.
+//! bodies, composed into streams the corpus serves off loopback, plus
+//! the recorded request body for the sample request.
+
+use serde_json::Value;
 
 /// Joins events into one SSE body: a blank line between events and a
 /// terminating one after the last.
@@ -282,4 +285,27 @@ pub fn block_flood_stream(count: usize) -> String {
         body.push_str(&event);
     }
     body
+}
+
+/// The recorded request body for the sample request: block-array
+/// system and promoted last-message content, each with its cache
+/// breakpoint.
+pub fn sample_body() -> Value {
+    serde_json::json!({
+        "model": crate::MODEL,
+        "system": [{
+            "type": "text",
+            "text": "You are a digest agent.",
+            "cache_control": {"type": "ephemeral"}
+        }],
+        "messages": [
+            {"role": "user", "content": [{
+                "type": "text",
+                "text": "Summarize the merged PRs.",
+                "cache_control": {"type": "ephemeral"}
+            }]}
+        ],
+        "max_tokens": 128,
+        "stream": true
+    })
 }

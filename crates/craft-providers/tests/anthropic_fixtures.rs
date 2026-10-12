@@ -8,6 +8,10 @@ mod error_tests;
 mod hostile_tests;
 #[path = "fixtures/mock.rs"]
 mod mock;
+#[path = "fixtures/anthropic/request_feature_tests.rs"]
+mod request_feature_tests;
+#[path = "fixtures/anthropic/request_media_tests.rs"]
+mod request_media_tests;
 #[path = "fixtures/anthropic/request_tests.rs"]
 mod request_tests;
 #[path = "fixtures/anthropic/stream_tests.rs"]

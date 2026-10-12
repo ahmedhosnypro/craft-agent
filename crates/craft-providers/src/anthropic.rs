@@ -2,7 +2,11 @@
 //! error mapping, and the shared retry ladder, over the neutral
 //! provider seam.
 
+mod caching;
+mod ceiling;
 mod chunk;
+mod ids;
+mod images;
 mod lane;
 mod request;
 
@@ -27,12 +31,21 @@ pub const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 /// The version header every request carries, per the versioning docs.
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 
+/// How the key rides on the wire: the documented `x-api-key` header, or
+/// a `Bearer` token.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AuthScheme {
+    ApiKey,
+    Bearer,
+}
+
 /// The Messages dialect mounted over one base URL.
 pub struct AnthropicProvider {
     client: reqwest::Client,
     base_url: String,
     model: String,
     api_key: String,
+    auth_scheme: AuthScheme,
     sse: craft_core::sse::SseOptions,
 }
 
@@ -44,8 +57,15 @@ impl AnthropicProvider {
             base_url: base_url.trim_end_matches('/').to_owned(),
             model: model.to_owned(),
             api_key: api_key.to_owned(),
+            auth_scheme: AuthScheme::ApiKey,
             sse: craft_core::sse::SseOptions::default(),
         })
+    }
+
+    /// Overrides how the key rides; no client rebuild needed.
+    pub fn with_auth_scheme(mut self, scheme: AuthScheme) -> Self {
+        self.auth_scheme = scheme;
+        self
     }
 
     /// Remounts the lane over an explicit total request deadline; the
@@ -67,12 +87,15 @@ impl AnthropicProvider {
         retry::climb(
             &self.client,
             |client| {
-                client
+                let request = client
                     .post(&url)
-                    .bearer_auth(&self.api_key)
                     .header("anthropic-version", ANTHROPIC_VERSION)
                     .header(reqwest::header::CONTENT_TYPE, "application/json")
-                    .body(payload.clone())
+                    .body(payload.clone());
+                match self.auth_scheme {
+                    AuthScheme::ApiKey => request.header("x-api-key", &self.api_key),
+                    AuthScheme::Bearer => request.bearer_auth(&self.api_key),
+                }
             },
             http_failure,
         )

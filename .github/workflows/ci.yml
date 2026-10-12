@@ -32,6 +32,7 @@ jobs:
       - run: cargo test -p craft-providers --test integration_stream_tools -- --ignored --nocapture
       - run: cargo test -p craft-providers --test integration_auth -- --ignored --nocapture
       - run: cargo test -p craft-providers --test integration_dialect_mount -- --ignored --nocapture
+      - run: cargo test -p craft-providers --test integration_anthropic -- --ignored --nocapture
       - run: cargo test -p craft-runtime --test integration_agent_loop -- --ignored --nocapture
       - run: ./scripts/scan-secrets.sh
       - run: ./scripts/scan-secrets.sh --selftest

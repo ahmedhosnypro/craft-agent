@@ -10,6 +10,8 @@ pub enum AppError {
     MissingEnv { var: &'static str },
     #[error("CRAFT_AGENT_PROVIDER must be anthropic, openai, or gemini; got `{value}`")]
     InvalidProvider { value: String },
+    #[error("ANTHROPIC_AUTH must be bearer or x-api-key; got `{value}`")]
+    InvalidAuth { value: String },
     #[error("provider `{name}` failed to initialize: {source}")]
     ProviderInit {
         name: &'static str,

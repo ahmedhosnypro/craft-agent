@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::sync::Arc;
 
-use craft_providers::anthropic::AnthropicProvider;
+use craft_providers::anthropic::{AnthropicProvider, AuthScheme};
 use craft_providers::backend::Backend;
 use craft_providers::gemini::GeminiProvider;
 use craft_providers::openai::OpenAiProvider;
@@ -29,6 +29,7 @@ pub struct EnvConfig {
     pub model: String,
     pub api_key: String,
     pub base_url: String,
+    pub anthropic_auth: AuthScheme,
     pub gh_token: Option<String>,
 }
 
@@ -62,6 +63,18 @@ fn optional(env: &EnvMap, var: &'static str) -> Option<String> {
     Some(value.clone())
 }
 
+/// `ANTHROPIC_AUTH`: `bearer` mounts a Bearer token; `x-api-key`, unset,
+/// or empty keeps the documented header. Anything else is a named error.
+fn anthropic_auth_scheme(env: &EnvMap) -> Result<AuthScheme, AppError> {
+    match optional(env, "ANTHROPIC_AUTH").as_deref() {
+        None | Some("x-api-key") => Ok(AuthScheme::ApiKey),
+        Some("bearer") => Ok(AuthScheme::Bearer),
+        Some(other) => Err(AppError::InvalidAuth {
+            value: other.to_string(),
+        }),
+    }
+}
+
 pub fn resolve_env_config(env: &EnvMap) -> Result<EnvConfig, AppError> {
     let provider = require(env, "CRAFT_AGENT_PROVIDER")?;
     let provider = match provider.as_str() {
@@ -84,18 +97,23 @@ pub fn resolve_env_config(env: &EnvMap) -> Result<EnvConfig, AppError> {
         ProviderKind::Gemini => ("GOOGLE_API_KEY", craft_providers::gemini::DEFAULT_BASE_URL),
     };
     let api_key = require(env, key_var)?;
-    let base_url = match provider {
-        ProviderKind::OpenAi => {
-            let override_url = optional(env, "OPENAI_BASE_URL");
-            override_url.unwrap_or_else(|| default_base.to_string())
-        }
-        _ => default_base.to_string(),
+    let (base_url, anthropic_auth) = match provider {
+        ProviderKind::OpenAi => (
+            optional(env, "OPENAI_BASE_URL").unwrap_or_else(|| default_base.to_string()),
+            AuthScheme::ApiKey,
+        ),
+        ProviderKind::Anthropic => (
+            optional(env, "ANTHROPIC_BASE_URL").unwrap_or_else(|| default_base.to_string()),
+            anthropic_auth_scheme(env)?,
+        ),
+        ProviderKind::Gemini => (default_base.to_string(), AuthScheme::ApiKey),
     };
     Ok(EnvConfig {
         provider,
         model,
         api_key,
         base_url,
+        anthropic_auth,
         gh_token: optional(env, "GH_TOKEN"),
     })
 }
@@ -115,7 +133,8 @@ pub fn mount_backend(config: &EnvConfig) -> Result<Arc<Backend>, AppError> {
                 .map_err(|source| AppError::ProviderInit {
                     name: "anthropic",
                     source,
-                })?;
+                })?
+                .with_auth_scheme(config.anthropic_auth);
             Backend::Anthropic(provider)
         }
         ProviderKind::Gemini => {

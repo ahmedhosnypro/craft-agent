@@ -193,3 +193,60 @@ async fn never_stopped_block_flood_hits_the_open_block_bound() -> Result<(), Tes
     assert!(detail_of(&err).contains("open content blocks"));
     Ok(())
 }
+
+const EV_NATIVE_START: &str = r#"event: message_start
+data: {"type":"message_start","message":{"usage":{"input_tokens":25,"output_tokens":1}}}"#;
+
+const EV_THINK_OPEN: &str = r#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}"#;
+
+const EV_REDACTED_OPEN: &str = r#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking"}}"#;
+
+const EV_TOOL_OPEN: &str = r#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_a","name":"get_weather","input":{}}}"#;
+
+const EV_BLOCK_CLOSE: &str = r#"event: content_block_stop
+data: {"type":"content_block_stop","index":0}"#;
+
+fn thinking_delta(text: &str) -> String {
+    format!(
+        "event: content_block_delta\ndata: {{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{{\"type\":\"thinking_delta\",\"thinking\":\"{text}\"}}}}"
+    )
+}
+
+#[tokio::test]
+async fn native_accumulation_over_the_cap_is_typed() -> Result<(), TestError> {
+    let fragment = "x".repeat(600_000);
+    let body = wire::stream(&[
+        EV_NATIVE_START,
+        EV_THINK_OPEN,
+        &thinking_delta(&fragment),
+        &thinking_delta(&fragment),
+    ]);
+    let events = events_over(body.as_bytes()).await?;
+    let err = surfaced(&events)?;
+    assert!(matches!(err, ProviderError::Transport { .. }), "{err:?}");
+    assert!(detail_of(&err).contains("exceeded"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn thinking_delta_on_a_tool_block_is_corrupt() -> Result<(), TestError> {
+    let body = wire::stream(&[EV_NATIVE_START, EV_TOOL_OPEN, &thinking_delta("hmm")]);
+    let events = events_over(body.as_bytes()).await?;
+    let err = surfaced(&events)?;
+    assert!(matches!(err, ProviderError::Transport { .. }), "{err:?}");
+    assert!(detail_of(&err).contains("on a non-native block"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn redacted_block_without_data_is_an_anomaly() -> Result<(), TestError> {
+    let body = wire::stream(&[EV_NATIVE_START, EV_REDACTED_OPEN, EV_BLOCK_CLOSE]);
+    let events = events_over(body.as_bytes()).await?;
+    let err = surfaced(&events)?;
+    assert!(matches!(err, ProviderError::Transport { .. }), "{err:?}");
+    assert!(detail_of(&err).contains("redacted block without data"));
+    Ok(())
+}

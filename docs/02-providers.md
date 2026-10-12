@@ -15,7 +15,10 @@ id, API key — and nothing else. No adapter reads the environment; the
 app layer resolves configuration and mounts the backend, so a lane or
 corpus can mount a loopback endpoint without touching process state.
 The base URL joins the endpoint path verbatim (a trailing slash is
-trimmed), so the request itself never carries endpoint state.
+trimmed), so the request itself never carries endpoint state. The
+Anthropic adapter alone carries one post-construction override —
+`with_auth_scheme`, how the key rides — mounted from `ANTHROPIC_AUTH`
+by the app layer.
 
 ## BYOK environment
 
@@ -30,6 +33,8 @@ ambient fallback:
 | `OPENAI_API_KEY` | Required for the `openai` dialect. |
 | `OPENAI_BASE_URL` | Optional override of the OpenAI base URL, so any OpenAI-compatible lane works; default `https://api.openai.com/v1`. |
 | `ANTHROPIC_API_KEY` | Required for the `anthropic` dialect. |
+| `ANTHROPIC_BASE_URL` | Optional override of the Anthropic base URL; default `https://api.anthropic.com`. |
+| `ANTHROPIC_AUTH` | Optional for the `anthropic` dialect; how the key rides. `x-api-key` (the default, and what unset or empty means) or `bearer`; anything else is a typed rejection. |
 | `GOOGLE_API_KEY` | Required for the `gemini` dialect. |
 | `GH_TOKEN` | Optional; handed to the gh tool. |
 
@@ -41,7 +46,7 @@ removes provider-key variables from every child process.
 | Dialect | Endpoint | Authentication |
 |---|---|---|
 | OpenAI Chat Completions | `{base}/chat/completions` | `Authorization: Bearer <key>` |
-| Anthropic Messages | `{base}/v1/messages` | `Authorization: Bearer <key>` plus `anthropic-version: 2023-06-01` |
+| Anthropic Messages | `{base}/v1/messages` | `x-api-key: <key>` by default, or `Authorization: Bearer <key>` when `ANTHROPIC_AUTH=bearer` opts in; every request also carries `anthropic-version: 2023-06-01` |
 | Gemini generateContent | `{base}/v1beta/models/{model}:streamGenerateContent?alt=sse` | `x-goog-api-key: <key>` |
 
 Every request carries `Content-Type: application/json`. Default hosts:
@@ -130,9 +135,15 @@ Per dialect:
   unknown names are skipped, so a newer protocol never breaks the lane.
   Blocks register at their wire index: a `tool_use` head emits the
   call's id and name at once, `input_json_delta` fragments the
-  arguments; `thinking` and future block kinds register but never
-  surface. A delta on the wrong block kind, or without a start, is a
-  typed transport error.
+  arguments. `thinking` and `redacted_thinking` heads open a native
+  accumulator: `thinking_delta` and `signature_delta` append under a
+  1 MiB per-block cap, and at the stop the lane emits exactly one
+  reconstructed native block — `{"type":"thinking", "thinking":…}`
+  with the `signature` field riding only when one arrived, or the
+  redacted block's data verbatim; an empty thinking block is a legal
+  skip, a redacted block without data is a typed failure. A delta on
+  the wrong block kind, or without a start, is a typed transport
+  error.
 - **Gemini** — camelCase chunk JSON; `usageMetadata` merges
   (`thoughtsTokenCount` lands in `reasoning_tokens`); a
   `promptFeedback.blockReason` is a `ContentFilter` terminal; thought
@@ -197,12 +208,19 @@ envelope) map onto the same taxonomy:
 
 - **OpenAI** — the system prompt rides as a leading system message;
   tools ride as `function` entries with `tool_choice: auto`.
-- **Anthropic** — top-level `system`; `max_tokens` is required; no
-  temperature rides the body (the dialect deprecated it). Assistant
-  turns are content blocks — `text` and `tool_use` (arguments parse
-  into the input object the wire requires). Consecutive tool results
-  flush as one user message of `tool_result` blocks; the error flag
-  marks rows the tool layer refused.
+- **Anthropic** — top-level `system`; `max_tokens` is required and
+  clamped to the family ceiling (below). Assistant turns are content
+  blocks — replayed native blocks first, then `text` and `tool_use`
+  (arguments parse into the input object the wire requires); an
+  assistant turn with no content at all is a typed rejection.
+  Consecutive tool results flush as one user message of `tool_result`
+  blocks; the error flag marks rows the tool layer refused. User text
+  and tool-result content become block arrays when images ride.
+  Sampling rides only when set: `temperature` and `top_p` as finite
+  JSON numbers (a non-finite value is a typed rejection),
+  `stop_sequences` when non-empty; anything unset keeps the provider
+  default. `tool_choice` (`auto`/`any`/`tool`) rides only with tools.
+  A final pass marks the three prompt-cache breakpoints.
 - **Gemini** — `systemInstruction` parts;
   `generationConfig.maxOutputTokens`; tools as `functionDeclarations`
   with `parametersJsonSchema`; assistant turns are `model` parts. A
@@ -211,11 +229,63 @@ envelope) map onto the same taxonomy:
   rejection. An error result rides the documented error key; a
   JSON-object result rides verbatim; any other text wraps in `output`.
 
+## Anthropic Messages specifics
+
+### The max_tokens family ceiling
+
+The Messages API rejects a `max_tokens` above each model family's
+output cap, so the encoder clamps the requested value before the body
+is built. The family token and the first two numeric tokens of the id
+decide the cap; an id naming no family passes through unclamped, and
+a bare family id aliases the current generation:
+
+| Family | Generation | Cap |
+|---|---|---|
+| opus | 3.x | 4096 |
+| opus | 4.0–4.4 | 32000 |
+| opus | 4.5 | 64000 |
+| opus | 4.6 and later | 128000 |
+| sonnet | 3.x | 8192 |
+| sonnet | 4.0–4.5 | 64000 |
+| sonnet | 4.6 and later | 128000 |
+| haiku | 3.0 | 4096 |
+| haiku | 3.5 | 8192 |
+| haiku | 4.0 and later | 64000 |
+
+### Prompt-cache breakpoints
+
+One final pass over the encoded body marks up to three breakpoints
+with `cache_control: {"type": "ephemeral"}` — the system prompt (a
+string is promoted to one marked text block), the last tool
+definition, and the last content block of the last message (promoted
+from a plain string when non-empty). Only the content-block types the
+API accepts are markable (`text`, `image`, `tool_result`,
+`tool_use`), and a block already carrying a breakpoint is never
+marked twice; empty or unmarkable blocks carry none.
+
+### Image attachments
+
+Images ride on user and tool_result content as `image` blocks: a
+base64 source with a whitelisted media type — `image/png`,
+`image/jpeg`, `image/gif`, `image/webp`; anything else is a typed
+`InvalidRequest` — or a url source. Message content stays a plain
+string when no images ride; with images it becomes a block array, and
+the text block is omitted when the text is empty.
+
+### Tool-call id sanitation
+
+Tool-call ids travel in one deterministic wire-safe form: `[A-Za-z0-9_-]`
+kept, every other char replaced with `-`, truncated to 64 bytes on a
+char boundary. A sanitized id that collides with an earlier one gets a
+numeric suffix, re-truncated to the cap. `tool_result` ids resolve
+through the same map, so each result answers the id its call sent;
+an id never registered in the turn sanitizes directly.
+
 ## Native-block replay
 
 Assistant messages carry `native_blocks`: dialect-tagged, verbatim
-provider-native blocks (Anthropic thinking blocks, Gemini thought
-signatures). Dropping them on replay is a protocol error, so they ride
+provider-native blocks (Anthropic thinking and redacted blocks, Gemini
+thought signatures). Dropping them on replay is a protocol error, so they ride
 the neutral message untouched and re-send verbatim — Anthropic ahead of
 the turn's text and `tool_use` blocks, Gemini as leading parts. The
 OpenAI dialect has no wire form: a request carrying native blocks is

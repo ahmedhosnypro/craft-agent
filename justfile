@@ -52,6 +52,10 @@ integration_auth:
 integration_dialect_mount:
     cargo test -p craft-providers --test integration_dialect_mount -- --ignored --nocapture
 
+# Anthropic Messages live corpus: streamed turn plus bad-key auth.
+integration_anthropic:
+    cargo test -p craft-providers --test integration_anthropic -- --ignored --nocapture
+
 # Full agent loop: real turn, tool dispatch, terminal record.
 integration_agent_loop:
     cargo test -p craft-runtime --test integration_agent_loop -- --ignored --nocapture
