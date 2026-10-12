@@ -4,7 +4,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use craft_digest::clone_runner::CloneRunner;
-use craft_digest::collect::GhRunner;
+use craft_digest::collect::{GhRunner, parse_repo_list};
 use craft_digest::jscpd_runner::JscpdRunner;
 use craft_digest::pipeline::{DigestDeps, DigestOptions, run_digest};
 
@@ -41,12 +41,7 @@ pub fn load_curated_repos(path: &Path) -> Result<Vec<String>, AppError> {
         path: path.to_path_buf(),
         source,
     })?;
-    let repos: Vec<String> = raw
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(str::to_string)
-        .collect();
+    let repos = parse_repo_list(&raw);
     if repos.is_empty() {
         return Err(AppError::EmptyRepoList {
             path: path.to_path_buf(),

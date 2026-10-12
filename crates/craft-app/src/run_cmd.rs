@@ -4,13 +4,13 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use craft_runtime::{RunConfig, Runner, RuntimeEvent};
+use craft_runtime::{RunConfig, Runner};
 use craft_tools::Registry;
 
-use crate::cli::{OutputFormat, PromptSource, RunCli};
+use crate::cli::{PromptSource, RunCli};
 use crate::config::{env_from_process, mount_backend, resolve_env_config};
 use crate::error::AppError;
-use crate::stream_json::{write_event, write_plain_event};
+use crate::event_writer;
 
 /// Prompt reads are bounded; a bigger prompt is rejected, not truncated.
 pub const PROMPT_CAP: usize = 1024 * 1024;
@@ -220,28 +220,19 @@ pub fn execute_run(run: RunCli) -> Result<i32, AppError> {
         std::env::current_dir().map_err(|source| AppError::WorkspaceRoot { source })?;
     let session_path = default_session_path(&workspace_root)?;
     let run_config = build_run_config(&run, workspace_root, session_path);
+    let session_path = run_config.session_path.clone();
     let registry = Registry::with_builtins(craft_tools::ToolLimits::default());
     let runner = Runner::new(backend, registry, run_config);
+    let (sink, writer) = event_writer::spawn_event_writer(run.output_format)?;
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|source| AppError::AsyncRuntime { source })?;
-    let format = run.output_format;
-    let outcome = runtime.block_on(runner.run(&prompt, |event| {
-        emit(format, &event);
-    }));
+    let outcome = runtime.block_on(event_writer::drive(
+        runner.run(&prompt, |event| sink.emit(event)),
+        writer,
+        session_path,
+    ));
     Ok(outcome.exit_code())
-}
-
-fn emit(format: OutputFormat, event: &RuntimeEvent) {
-    let stdout = std::io::stdout();
-    let mut out = stdout.lock();
-    let result = match format {
-        OutputFormat::StreamJson => write_event(&mut out, event),
-        OutputFormat::Plain => write_plain_event(&mut out, event),
-    };
-    if let Err(error) = result {
-        eprintln!("craft-agent: run-event write failed: {error}");
-    }
 }

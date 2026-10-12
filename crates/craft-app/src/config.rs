@@ -1,6 +1,7 @@
 //! Env resolution: a named provider, a named key, no ambient fallbacks.
 
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::sync::Arc;
 
 use craft_providers::anthropic::AnthropicProvider;
@@ -32,7 +33,18 @@ pub struct EnvConfig {
 }
 
 pub fn env_from_process() -> EnvMap {
-    std::env::vars().collect()
+    collect_env(std::env::vars_os())
+}
+
+/// Non-UTF-8 entries are dropped, never a panic; a variable the config
+/// actually needs then surfaces as its named missing-env error.
+fn collect_env<I>(vars: I) -> EnvMap
+where
+    I: IntoIterator<Item = (OsString, OsString)>,
+{
+    vars.into_iter()
+        .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+        .collect()
 }
 
 fn require(env: &EnvMap, var: &'static str) -> Result<String, AppError> {
@@ -116,4 +128,26 @@ pub fn mount_backend(config: &EnvConfig) -> Result<Arc<Backend>, AppError> {
         }
     };
     Ok(Arc::new(backend))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::collect_env;
+    use std::ffi::OsString;
+
+    #[cfg(unix)]
+    use std::os::unix::ffi::OsStringExt;
+
+    #[test]
+    #[cfg(unix)]
+    fn non_utf8_env_entries_are_skipped_not_panics() {
+        let vars = vec![
+            (OsString::from("OK"), OsString::from("1")),
+            (OsString::from_vec(vec![0xff, 0xfe]), OsString::from("2")),
+            (OsString::from("ALSO_OK"), OsString::from_vec(vec![0xff])),
+        ];
+        let map = collect_env(vars);
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get("OK").map(String::as_str), Some("1"));
+    }
 }

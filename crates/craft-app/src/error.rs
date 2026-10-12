@@ -28,6 +28,8 @@ pub enum AppError {
     PromptNotUtf8,
     #[error("could not start the async runtime: {source}")]
     AsyncRuntime { source: std::io::Error },
+    #[error("could not start the run-event writer thread: {source}")]
+    EventWriter { source: std::io::Error },
     #[error("could not resolve the workspace root: {source}")]
     WorkspaceRoot { source: std::io::Error },
     #[error("could not prepare the session directory `{path}`: {source}")]

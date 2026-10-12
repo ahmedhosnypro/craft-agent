@@ -25,4 +25,4 @@ craft-providers = { path = "../craft-providers", version = "0.1.0" }
 craft-runtime = { path = "../craft-runtime", version = "0.1.0" }
 craft-tools = { path = "../craft-tools", version = "0.1.0" }
 serde_json = "1"
-tokio = { version = "1", features = ["rt", "time"] }
+tokio = { version = "1", features = ["rt", "time", "sync", "macros"] }

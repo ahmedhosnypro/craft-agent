@@ -5,6 +5,7 @@ pub mod cli;
 pub mod config;
 pub mod digest_cmd;
 pub mod error;
+pub mod event_writer;
 pub mod run_cmd;
 pub mod stream_json;
 

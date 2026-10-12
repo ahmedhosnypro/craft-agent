@@ -31,6 +31,11 @@ pub fn write_plain_event(out: &mut dyn Write, event: &RuntimeEvent) -> io::Resul
         RuntimeEvent::AssistantDelta { text, .. } => {
             out.write_all(text.as_bytes()).and_then(|_| writeln!(out))
         }
+        RuntimeEvent::TurnRetried {
+            turn,
+            attempt,
+            reason,
+        } => writeln!(out, "[retry turn {turn}] attempt {attempt} died: {reason}"),
         RuntimeEvent::ToolCall { name, .. } => writeln!(out, "[tool] {name}"),
         RuntimeEvent::ToolProgress {
             name, text, stream, ..
