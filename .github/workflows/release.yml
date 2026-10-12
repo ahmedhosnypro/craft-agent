@@ -101,6 +101,7 @@ jobs:
       - name: Stage dist
         run: |
           set -euo pipefail
+          mkdir -p dist
           install -m 0755 "target/${TARGET}/release/craft-agent" "dist/craft-agent-${TARGET}"
           install -m 0755 "target/${TARGET}/release/craft-helpers" "dist/craft-helpers-${TARGET}"
       - name: Upload the binaries
