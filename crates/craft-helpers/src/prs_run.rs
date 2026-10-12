@@ -2,6 +2,7 @@
 
 use serde::Serialize;
 
+use crate::Truncation;
 use crate::error::{HelperError, bounded};
 use crate::fetch::{Fetch, FetchResponse};
 use crate::prs::{FileRow, PullRow, parse_file_rows, parse_pull_detail, parse_pull_page};
@@ -59,6 +60,7 @@ pub struct PrsReport {
     pub since: String,
     pub repos: Vec<RepoReport>,
     pub errors: Vec<ErrorRow>,
+    pub truncated: Vec<Truncation>,
 }
 
 #[derive(Debug, Serialize)]
@@ -93,10 +95,12 @@ pub fn collect_prs(fetch: &dyn Fetch, query: &PrsQuery) -> PrsReport {
         since: query.since_label.clone(),
         repos: Vec::new(),
         errors: Vec::new(),
+        truncated: Vec::new(),
     };
     let mut budget = query.max_prs;
+    let mut truncated: Vec<Truncation> = Vec::new();
     for repo in &query.repos {
-        let (prs, messages) = collect_repo(fetch, query, repo, cutoff, &mut budget);
+        let (prs, messages) = collect_repo(fetch, query, repo, cutoff, &mut budget, &mut truncated);
         for message in messages {
             report.errors.push(ErrorRow::new(repo.clone(), &message));
         }
@@ -105,6 +109,7 @@ pub fn collect_prs(fetch: &dyn Fetch, query: &PrsQuery) -> PrsReport {
             prs,
         });
     }
+    report.truncated = truncated;
     report
 }
 
@@ -136,9 +141,11 @@ fn collect_repo(
     repo: &str,
     cutoff: u64,
     budget: &mut usize,
+    truncated: &mut Vec<Truncation>,
 ) -> (Vec<PrsEntry>, Vec<String>) {
     let mut matched: Vec<(u64, PullRow)> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
+    let mut more_may_exist = false;
     for page in 1..=MAX_PAGES {
         let url = pulls_page_url(&query.org, repo, page);
         let response = match fetch.get(&url) {
@@ -156,8 +163,10 @@ fn collect_repo(
             }
         };
         let page_len = row.len();
+        let mut clipped_on_page = false;
         for pull in row {
             if matched.len() >= query.limit_per_repo {
+                clipped_on_page = true;
                 break;
             }
             if let Some(secs) = parse_rfc3339_secs(&pull.merged_at)
@@ -166,6 +175,7 @@ fn collect_repo(
                 matched.push((secs, pull));
             }
         }
+        more_may_exist = clipped_on_page || page_len == PER_PAGE;
         if matched.len() >= query.limit_per_repo || page_len < PER_PAGE {
             break;
         }
@@ -173,7 +183,17 @@ fn collect_repo(
     // Sort by the parsed instant: offset-form timestamps order wrongly as text.
     matched.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.number.cmp(&a.1.number)));
     matched.truncate(query.limit_per_repo);
+    if matched.len() >= query.limit_per_repo && more_may_exist {
+        truncated.push(Truncation::new(
+            "prs-per-repo",
+            query.limit_per_repo,
+            &format!(
+                "{repo}: more merged PRs may exist; raise --limit-per-repo (ceiling {MAX_LIMIT_PER_REPO})"
+            ),
+        ));
+    }
     let mut prs = Vec::new();
+    let matched_count = matched.len();
     for (_, pull) in matched {
         if *budget == 0 {
             break;
@@ -189,6 +209,13 @@ fn collect_repo(
             }
             Err(err) => errors.push(err.to_string()),
         }
+    }
+    if *budget == 0 && prs.len() < matched_count {
+        truncated.push(Truncation::new(
+            "prs-total",
+            query.max_prs,
+            &format!("{repo}: total cap reached; raise --max-prs (ceiling {MAX_MAX_PRS})"),
+        ));
     }
     (prs, errors)
 }

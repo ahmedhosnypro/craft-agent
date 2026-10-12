@@ -75,6 +75,7 @@ fn collects_merged_prs_inside_the_window() {
         "crates/craft-digest/src/window.rs"
     );
     assert_eq!(pr.changed_files[0].status, "modified");
+    assert!(report.truncated.is_empty());
 }
 
 #[test]
@@ -243,4 +244,41 @@ fn offset_timestamps_sort_by_instant_not_text() {
     assert!(report.errors.is_empty());
     let numbers: Vec<u64> = report.repos[0].prs.iter().map(|pr| pr.number).collect();
     assert_eq!(numbers, vec![1, 2]);
+}
+
+#[test]
+fn per_repo_cap_marks_truncation() {
+    let fetch = routes_for(FakeFetch::new(), "storytold", "craft-agent");
+    let report = collect_prs(&fetch, &query(&["craft-agent"], 48 * 3600, 1, 50));
+    assert_eq!(report.repos[0].prs.len(), 1);
+    assert_eq!(report.truncated.len(), 1);
+    let marker = &report.truncated[0];
+    assert_eq!(marker.field, "prs-per-repo");
+    assert_eq!(marker.cap, 1);
+    assert!(marker.hint.contains("craft-agent"), "{}", marker.hint);
+    assert!(marker.hint.contains("--limit-per-repo"), "{}", marker.hint);
+}
+
+#[test]
+fn total_cap_marks_truncation_for_the_clipped_repo() {
+    let mut fetch = routes_for(FakeFetch::new(), "storytold", "one");
+    fetch = routes_for(fetch, "storytold", "two");
+    let report = collect_prs(&fetch, &query(&["one", "two"], 48 * 3600, 30, 3));
+    assert_eq!(report.repos[0].prs.len(), 2);
+    assert_eq!(report.repos[1].prs.len(), 1);
+    assert_eq!(report.truncated.len(), 1);
+    let marker = &report.truncated[0];
+    assert_eq!(marker.field, "prs-total");
+    assert_eq!(marker.cap, 3);
+    assert!(marker.hint.contains("two"), "{}", marker.hint);
+    assert!(marker.hint.contains("--max-prs"), "{}", marker.hint);
+}
+
+#[test]
+fn unclipped_collections_carry_no_truncation_markers() {
+    let mut fetch = routes_for(FakeFetch::new(), "storytold", "one");
+    fetch = routes_for(fetch, "storytold", "two");
+    let report = collect_prs(&fetch, &query(&["one", "two"], 48 * 3600, 30, 50));
+    assert!(report.errors.is_empty());
+    assert!(report.truncated.is_empty());
 }

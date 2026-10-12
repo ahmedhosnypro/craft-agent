@@ -37,6 +37,7 @@ fn execute(command: Command) -> Result<i32, HelperError> {
                 roots: args.roots,
                 min_lines: args.min_lines,
                 max_candidates: args.max_candidates,
+                cross_only: args.cross_only,
             };
             let report = scan_dups(&query)?;
             print_json(&report)

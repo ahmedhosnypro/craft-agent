@@ -22,8 +22,13 @@ pub enum HelperError {
     TooLarge(usize),
     #[error("invalid --since {0:?}: expected <n><s|m|h|d>, at most 366 days")]
     InvalidWindow(String),
-    #[error("invalid --min-lines {0}: expected 2..=200")]
-    InvalidMinLines(usize),
+    #[error("invalid --{name} {value}: must be {low}..={high}")]
+    InvalidBound {
+        name: String,
+        value: String,
+        low: usize,
+        high: usize,
+    },
     #[error("invalid argument {name}: {value}")]
     InvalidArg { name: String, value: String },
     #[error("duplicate scan failed: {0}")]
@@ -37,6 +42,16 @@ pub enum HelperError {
 /// Bound a hostile message to MESSAGE_CHARS on a char boundary.
 pub fn bounded(message: &str) -> String {
     truncate_chars(message, MESSAGE_CHARS)
+}
+
+/// A range violation naming the accepted bounds in the message.
+pub fn invalid_bound(name: &str, value: &str, low: usize, high: usize) -> HelperError {
+    HelperError::InvalidBound {
+        name: name.to_string(),
+        value: bounded(value),
+        low,
+        high,
+    }
 }
 
 /// Truncate to at most `cap` chars, never splitting a char.

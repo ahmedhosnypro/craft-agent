@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+use crate::Truncation;
+
 /// One scanned source file; anything past this size is a skip note.
 pub const MAX_FILE_BYTES: u64 = 1 << 20;
 /// Directory depth; deeper trees get a skip note.
@@ -29,12 +31,14 @@ pub struct DupsQuery {
     pub roots: Vec<PathBuf>,
     pub min_lines: usize,
     pub max_candidates: usize,
+    pub cross_only: bool,
 }
 
 #[derive(Debug, Serialize)]
 pub struct DupsReport {
     pub candidates: Vec<Candidate>,
     pub skipped: Vec<String>,
+    pub truncated: Vec<Truncation>,
 }
 
 #[derive(Debug, Serialize)]
@@ -83,7 +87,11 @@ fn is_comment(trimmed: &str) -> bool {
 }
 
 /// Walk one root in sorted order; every anomaly is a note, never an Err.
-pub(crate) fn collect_files(root: &Path, skipped: &mut Vec<String>) -> Vec<ScanFile> {
+pub(crate) fn collect_files(
+    root: &Path,
+    skipped: &mut Vec<String>,
+    truncated: &mut Vec<Truncation>,
+) -> Vec<ScanFile> {
     let mut files = Vec::new();
     if !root.is_dir() {
         skipped.push(format!("root {}: not a directory, skipped", root.display()));
@@ -93,7 +101,7 @@ pub(crate) fn collect_files(root: &Path, skipped: &mut Vec<String>) -> Vec<ScanF
         count: 0,
         capped: false,
     };
-    walk(root, root, 0, &mut state, &mut files, skipped);
+    walk(root, root, 0, &mut state, &mut files, skipped, truncated);
     files
 }
 
@@ -126,6 +134,7 @@ fn walk(
     state: &mut WalkState,
     files: &mut Vec<ScanFile>,
     skipped: &mut Vec<String>,
+    truncated: &mut Vec<Truncation>,
 ) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         skipped.push(format!(
@@ -141,7 +150,18 @@ fn walk(
     for name in names {
         if state.count >= MAX_FILES_PER_ROOT {
             if !state.capped {
-                skipped.push("file cap reached; remaining files skipped".to_string());
+                skipped.push(format!(
+                    "root {}: file cap reached; remaining files skipped",
+                    root.display()
+                ));
+                truncated.push(Truncation::new(
+                    "files",
+                    MAX_FILES_PER_ROOT,
+                    &format!(
+                        "root {} hit the per-root file cap; scan narrower roots",
+                        root.display()
+                    ),
+                ));
                 state.capped = true;
             }
             return;
@@ -159,7 +179,7 @@ fn walk(
                 ));
                 continue;
             }
-            walk(root, &path, depth + 1, state, files, skipped);
+            walk(root, &path, depth + 1, state, files, skipped, truncated);
         } else if path.is_file() && is_source(&name_lossy) {
             state.count += 1;
             scan_path(root, &path, files, skipped);

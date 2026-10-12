@@ -20,6 +20,8 @@ one. Work the phases in order and write as you go.
 - NEVER run any build or test command, and install nothing: this environment
   intentionally has no toolchains. Analyze by reading code and diffs, never
   by executing them.
+- The container ships only git, gh, jq, and curl — no compilers, no
+  interpreters (python3 and node are absent). jq is the JSON filter.
 - Work only inside the workspace and /runner/temp. Never print environment
   variables or secrets; the report must carry no credentials.
 - Measured facts only: every claim links its PR or file; unknown is stated
@@ -43,19 +45,24 @@ to delivering.
 
 - `craft-helpers prs --org storytold --repos photocraft,filmcraft --since
   24h --json` — the merged pull requests with authors, stats, changed files.
+  The helper keeps the newest 30 per repository and 50 total; if its JSON
+  carries a `truncated` marker, say so in the report.
 - Shallow-clone both repositories into /runner/temp (read-only clones:
   `git clone --depth 1 https://github.com/storytold/<repo>.git`).
 - `craft-helpers dups --roots <photocraft-dir>,<filmcraft-dir> --min-lines
-  6 --json` — run ONCE. Its reply carries `skipped: "window cap reached;
-  scan truncated"` and ~20 candidates from the first tree only: that is the
-  helper's normal window behavior, NOT an error and NOT a signal to retry.
-  Do not re-run it with different flags, root orderings, or --max-candidates
-  values — no value reaches the second tree.
+  6 --json` — run ONCE. Its reply carries a window-cap skip note and a
+  `truncated` marker naming the root that filled the cap, plus ~20
+  candidates from the first tree only: that is the helper's normal window
+  behavior, NOT an error and NOT a signal to retry. Do not re-run it with
+  different flags, root orderings, or --max-candidates values — no value
+  reaches the second tree.
 - Cross-repo candidates come from ONE bounded loop: list the crate
   directories both clones share (`comm -12` on the two `crates/` listings),
   then a single bash loop scanning each pair, e.g.
   `craft-helpers dups --roots <fc>/crates/$c,<pc>/crates/$c --min-lines 6
-  --json`, one invocation per shared crate, all inside one loop call.
+  --cross-only --max-candidates 500 --json`, one invocation per shared
+  crate, all inside one loop call. With `--cross-only` every reply carries
+  only candidates occurring in BOTH trees — no jq re-derivation needed.
   Then STOP scanning: no second passes, no flag tuning, no per-file scans.
 - Rank the cross-repo candidates by repeated lines, descending. That
   ranking is the verification queue.

@@ -46,10 +46,10 @@ pub struct PrsArgs {
     /// Look-back window before now: <n><s|m|h|d>, at most 366d.
     #[arg(long, value_parser = parse_lookback)]
     pub since: Lookback,
-    /// Newest merged PRs kept per repository.
+    /// Newest merged PRs kept per repository; at most 100.
     #[arg(long, default_value_t = DEFAULT_LIMIT_PER_REPO, value_parser = parse_limit_per_repo)]
     pub limit_per_repo: usize,
-    /// Total merged PRs kept across all repositories.
+    /// Total merged PRs kept across all repositories; at most 500.
     #[arg(long, default_value_t = DEFAULT_MAX_PRS, value_parser = parse_max_prs)]
     pub max_prs: usize,
     /// Emit the report as one JSON document.
@@ -129,9 +129,11 @@ fn parse_bounded(
     low: usize,
     high: usize,
 ) -> Result<usize, HelperError> {
-    let value: usize = raw.parse().map_err(|_| invalid_arg(name, raw))?;
+    let value: usize = raw
+        .parse()
+        .map_err(|_| crate::error::invalid_bound(name, raw, low, high))?;
     if value < low || value > high {
-        return Err(invalid_arg(name, raw));
+        return Err(crate::error::invalid_bound(name, raw, low, high));
     }
     Ok(value)
 }
@@ -145,11 +147,7 @@ pub fn parse_max_prs(raw: &str) -> Result<usize, HelperError> {
 }
 
 pub fn parse_min_lines(raw: &str) -> Result<usize, HelperError> {
-    let value: usize = raw.parse().map_err(|_| invalid_arg("min-lines", raw))?;
-    if !(2..=MAX_MIN_LINES).contains(&value) {
-        return Err(HelperError::InvalidMinLines(value));
-    }
-    Ok(value)
+    parse_bounded(raw, "min-lines", 2, MAX_MIN_LINES)
 }
 
 pub fn parse_max_candidates(raw: &str) -> Result<usize, HelperError> {
@@ -161,12 +159,15 @@ pub struct DupsArgs {
     /// Trees to scan, comma-separated.
     #[arg(long, value_delimiter = ',', required = true)]
     pub roots: Vec<PathBuf>,
-    /// Consecutive normalized lines that count as a duplicate block.
+    /// Consecutive normalized lines that count as a duplicate block; 2..=200.
     #[arg(long, default_value_t = DEFAULT_MIN_LINES, value_parser = parse_min_lines)]
     pub min_lines: usize,
-    /// Duplicate groups kept, ranked by repeated lines.
+    /// Duplicate groups kept, ranked by repeated lines; at most 500.
     #[arg(long, default_value_t = DEFAULT_MAX_CANDIDATES, value_parser = parse_max_candidates)]
     pub max_candidates: usize,
+    /// Keep only candidates whose occurrences span multiple roots.
+    #[arg(long)]
+    pub cross_only: bool,
     /// Emit the report as one JSON document.
     #[arg(long, required = true)]
     pub json: bool,
