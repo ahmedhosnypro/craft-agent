@@ -3,8 +3,11 @@
 # mission (run or digest). Inputs reach the run scripts through env only —
 # never through expression interpolation inside the scripts.
 name: craft-agent
-description: BYOK agentic AI agent for the storytold suite — one bounded agent turn over a prompt, or the daily suite digest.
+description: BYOK agentic AI agent for GitHub Actions — one bounded agent run over a prompt, or the daily suite digest.
 author: ahmedhosnypro
+branding:
+  icon: terminal
+  color: gray-dark
 
 inputs:
   mission:
