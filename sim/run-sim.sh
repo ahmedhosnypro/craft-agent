@@ -114,9 +114,11 @@ jq -n \
 
 # The clone targets this repository only; the credential helper rides
 # GH_TOKEN, so the token never lands in a URL or a config file. A failed
-# clone marks the manifest and keeps the run dir as evidence.
-if ! git -c credential.helper='!gh auth git-credential' clone "$repo_url" \
-  "$run_dir/workspace"; then
+# clone marks the manifest and keeps the run dir as evidence. HTTP/1.1 and
+# the low-speed abort keep a stalled stream from hanging the run silently.
+if ! git -c credential.helper='!gh auth git-credential' \
+  -c http.version=HTTP/1.1 -c http.lowSpeedLimit=1000 -c http.lowSpeedTimeout=60 \
+  clone "$repo_url" "$run_dir/workspace"; then
   update_manifest '.status = $status | .finished_at = $finished_at' \
     --arg status "clone-failed" \
     --arg finished_at "$(date +%Y-%m-%dT%H:%M:%S%:z)"
@@ -140,6 +142,7 @@ docker run --rm --network host \
   -e CRAFT_AGENT_RESULT_WINDOW_TURNS \
   -e CRAFT_AGENT_EGRESS_ALLOWLIST \
   -e CRAFT_AGENT_WRITE_REPO \
+  -e CRAFT_AGENT_READ_ROOTS="${CRAFT_AGENT_READ_ROOTS:-/runner/temp}" \
   -e CRAFT_AGENT_PROMPT_FILE="/tasks/${task}.md" \
   -e SIM_HOST_UID="$(id -u)" \
   -e SIM_HOST_GID="$(id -g)" \
