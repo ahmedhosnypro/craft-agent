@@ -38,18 +38,24 @@ pub(crate) fn sum_usage(running: Usage, turn: Usage) -> Usage {
 /// None while the run may continue; Some(detail) when the budget fails
 /// closed — exceeded, or unverifiable because usage is incomplete.
 ///
-/// Spend counts the top-level buckets only: on the wire the cache
-/// buckets ride inside `input_tokens` (the OpenAI prompt-details
-/// object) and reasoning inside `output_tokens` (the completion
-/// details), so summing them in would double-count the cached prefix.
-/// Every bucket still accumulates into the run total for reporting.
+/// The usage buckets are disjoint: the provider parse splits the
+/// prompt into input plus cache-read (and cache-write where reported)
+/// and the completion into output plus reasoning. Spend sums every
+/// bucket, so the cap bounds the full context the provider processed —
+/// cached prefixes included — and the sum matches the provider's own
+/// per-turn totals without overlap.
 pub(crate) fn budget_status(total: &Usage, max: u64) -> Option<String> {
     if total.incomplete {
         return Some(String::from(
             "token budget cannot be verified: the provider reported incomplete usage",
         ));
     }
-    let spent = total.input_tokens.saturating_add(total.output_tokens);
+    let spent = total
+        .input_tokens
+        .saturating_add(total.cache_read_tokens)
+        .saturating_add(total.cache_write_tokens)
+        .saturating_add(total.output_tokens)
+        .saturating_add(total.reasoning_tokens);
     (spent >= max).then(|| format!("token budget exceeded: {spent} tokens spent, {max} allowed"))
 }
 

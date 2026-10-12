@@ -36,6 +36,7 @@ pub(crate) fn abandon_calls(
             call_id: call.id.clone(),
             content: format!("tool call not completed: {detail}"),
             is_error: true,
+            images: Vec::new(),
         })?;
     }
     Ok(())
@@ -86,6 +87,7 @@ pub(crate) async fn execute_calls(
             call_id: call.id.clone(),
             content: content.clone(),
             is_error,
+            images: Vec::new(),
         })?;
         sink(RuntimeEvent::ToolResult {
             turn,
@@ -106,6 +108,7 @@ pub(crate) async fn execute_calls(
     if nudge {
         session.append(craft_core::types::ChatMessage::User {
             text: String::from(NUDGE_TEXT),
+            images: Vec::new(),
         })?;
     }
     Ok(Flow::Continue)

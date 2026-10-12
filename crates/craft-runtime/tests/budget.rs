@@ -1,7 +1,7 @@
 //! Budget corpus: max-turns and max-total-tokens aborts, both fail-closed
-//! on unverifiable usage. Spent means input + output only — the cache
-//! and reasoning buckets are subsets of those two on the provider
-//! wires and are not summed into the spend.
+//! on unverifiable usage. Spent means the sum of the disjoint usage
+//! buckets — input + cache-read + cache-write + output + reasoning —
+//! and the guard runs after every turn, the final one included.
 
 mod common;
 
@@ -53,7 +53,7 @@ async fn max_total_tokens_abort_is_exit_three_before_more_tools() {
         outcome
             .detail
             .contains("token budget exceeded: 25 tokens spent, 20 allowed"),
-        "the guard fires at the input-plus-output sum: {outcome:?}"
+        "the guard fires at the bucket sum: {outcome:?}"
     );
     // The budget fired before the next tool round could execute.
     assert!(
@@ -64,15 +64,12 @@ async fn max_total_tokens_abort_is_exit_three_before_more_tools() {
 }
 
 #[tokio::test]
-async fn cache_read_tokens_do_not_inflate_spent() {
-    // Two turns at 10 in + 5 out with a 1M-token cached prefix each:
-    // the cache bucket rides inside input on the wire, so spent is
-    // the 30 top-level tokens, not 2,000,030.
+async fn cache_read_tokens_count_toward_spend() {
+    // A turn at 10 uncached in + 5 out with a 1M-token cached prefix:
+    // the prefix is real context the provider processed, so the turn
+    // spends 1,000,015 tokens and the guard fires at turn one.
     let used = bucketed_usage(10, 5, 1_000_000, 0);
-    let provider = FakeProvider::new(vec![
-        tool_turn("c1", "scripted", "{}", used),
-        text_turn("done", StopReason::EndTurn, used),
-    ]);
+    let provider = FakeProvider::new(vec![tool_turn("c1", "scripted", "{}", used)]);
     let runner = Runner::new(
         provider,
         registry_with_ok("scripted", "out"),
@@ -80,25 +77,28 @@ async fn cache_read_tokens_do_not_inflate_spent() {
     );
     let (outcome, _) = run_collect(&runner, "cached prefix").await;
 
-    assert_eq!(outcome.exit_code(), 0);
-    assert_eq!(outcome.usage.input_tokens, 20);
-    assert_eq!(outcome.usage.output_tokens, 10);
+    assert_eq!(outcome.exit_code(), 3);
+    assert_eq!(outcome.category, CancelCategory::Budget);
+    assert!(
+        outcome
+            .detail
+            .contains("token budget exceeded: 1000015 tokens spent, 100 allowed"),
+        "{outcome:?}"
+    );
     assert_eq!(
-        outcome.usage.cache_read_tokens, 2_000_000,
+        outcome.usage.cache_read_tokens, 1_000_000,
         "the cache bucket still accumulates for reporting"
     );
 }
 
 #[tokio::test]
-async fn reasoning_inside_output_is_not_summed_again() {
-    // 10 in + 20 out with reasoning a 20-token subset of the output,
-    // on two tool turns: spent is 60, not 120, so a 61 budget funds
-    // both rounds.
+async fn reasoning_counts_toward_spend() {
+    // Two turns at 10 in + 20 visible out + 20 reasoning: each turn
+    // spends 50, so a 61 budget funds exactly one round.
     let used = bucketed_usage(10, 20, 0, 20);
     let provider = FakeProvider::new(vec![
         tool_turn("c1", "scripted", "{}", used),
         tool_turn("c2", "scripted", "{}", used),
-        text_turn("done", StopReason::EndTurn, usage(1, 1)),
     ]);
     let runner = Runner::new(
         provider,
@@ -107,15 +107,21 @@ async fn reasoning_inside_output_is_not_summed_again() {
     );
     let (outcome, _) = run_collect(&runner, "reasoning").await;
 
-    assert_eq!(outcome.exit_code(), 0);
-    assert_eq!(outcome.turns, 3);
+    assert_eq!(outcome.exit_code(), 3);
+    assert_eq!(outcome.turns, 2);
+    assert!(
+        outcome
+            .detail
+            .contains("token budget exceeded: 100 tokens spent, 61 allowed"),
+        "{outcome:?}"
+    );
     assert_eq!(outcome.usage.reasoning_tokens, 40);
 }
 
 #[tokio::test]
-async fn the_guard_fires_on_input_plus_output_despite_subset_buckets() {
-    // 15 in + 10 out with cache and reasoning set: the detail pins the
-    // spend at input plus output, with the subsets uncounted.
+async fn the_guard_fires_on_the_full_bucket_sum() {
+    // 15 uncached in + 5 000 cached + 10 visible out + 23 reasoning:
+    // the detail pins the spend at the bucket sum.
     let used = bucketed_usage(15, 10, 5_000, 23);
     let provider = FakeProvider::new(vec![tool_turn("c1", "scripted", "{}", used)]);
     let runner = Runner::new(
@@ -130,13 +136,15 @@ async fn the_guard_fires_on_input_plus_output_despite_subset_buckets() {
     assert!(
         outcome
             .detail
-            .contains("token budget exceeded: 25 tokens spent, 20 allowed"),
+            .contains("token budget exceeded: 5048 tokens spent, 20 allowed"),
         "{outcome:?}"
     );
 }
 
 #[tokio::test]
-async fn finishing_exactly_at_budget_succeeds() {
+async fn finishing_exactly_at_the_cap_is_exit_three() {
+    // The cap is inclusive: a run that spends exactly its allowance
+    // has reached the budget, and the guard runs before completion.
     let provider = FakeProvider::new(vec![text_turn("done", StopReason::EndTurn, usage(10, 0))]);
     let runner = Runner::new(
         provider,
@@ -144,20 +152,81 @@ async fn finishing_exactly_at_budget_succeeds() {
         limited(40, 10),
     );
     let (outcome, _) = run_collect(&runner, "finish").await;
-    assert_eq!(outcome.exit_code(), 0);
-    assert_eq!(outcome.usage.input_tokens, 10);
+    assert_eq!(outcome.exit_code(), 3);
+    assert_eq!(outcome.category, CancelCategory::Budget);
+    assert!(
+        outcome
+            .detail
+            .contains("token budget exceeded: 10 tokens spent, 10 allowed"),
+        "{outcome:?}"
+    );
 }
 
 #[tokio::test]
-async fn overspend_on_a_finishing_turn_still_returns_the_answer() {
-    let provider = FakeProvider::new(vec![text_turn("done", StopReason::EndTurn, usage(11, 0))]);
+async fn a_finishing_turn_that_crosses_the_cap_aborts_with_exit_three() {
+    // The final turn is charged before the run may conclude: crossing
+    // the cap while delivering the answer is a budget conclusion, not
+    // a silent overshoot.
+    let provider = FakeProvider::new(vec![
+        tool_turn("c1", "scripted", "{}", usage(60, 0)),
+        text_turn("done", StopReason::EndTurn, usage(30, 15)),
+    ]);
     let runner = Runner::new(
         provider,
         registry_with_ok("scripted", "out"),
-        limited(40, 10),
+        limited(40, 100),
     );
-    let (outcome, _) = run_collect(&runner, "finish").await;
-    assert_eq!(outcome.exit_code(), 0);
+    let (outcome, _) = run_collect(&runner, "cross on the last turn").await;
+
+    assert_eq!(outcome.exit_code(), 3);
+    assert_eq!(outcome.category, CancelCategory::Budget);
+    assert_eq!(outcome.turns, 2);
+    assert!(
+        outcome
+            .detail
+            .contains("token budget exceeded: 105 tokens spent, 100 allowed"),
+        "{outcome:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_cache_heavy_run_crosses_on_the_finishing_turn() {
+    // A mostly-cached run: turn one spends 3 134 and funds its tool
+    // round; the final turn pushes the bucket sum to 9 014, so the
+    // run ends budgeted even though the answer arrived.
+    let provider = FakeProvider::new(vec![
+        tool_turn("c1", "scripted", "{}", bucketed_usage(969, 18, 1_920, 227)),
+        text_turn(
+            "done",
+            StopReason::EndTurn,
+            bucketed_usage(1_867, 1_199, 2_560, 254),
+        ),
+    ]);
+    let runner = Runner::new(
+        provider,
+        registry_with_ok("scripted", "out"),
+        limited(40, 4_000),
+    );
+    let (outcome, events) = run_collect(&runner, "mostly cache").await;
+
+    assert_eq!(outcome.exit_code(), 3);
+    assert_eq!(outcome.category, CancelCategory::Budget);
+    assert_eq!(outcome.turns, 2);
+    assert!(
+        outcome
+            .detail
+            .contains("token budget exceeded: 9014 tokens spent, 4000 allowed"),
+        "{outcome:?}"
+    );
+    assert_eq!(outcome.usage.input_tokens, 2_836);
+    assert_eq!(outcome.usage.output_tokens, 1_217);
+    assert_eq!(outcome.usage.cache_read_tokens, 4_480);
+    assert_eq!(outcome.usage.reasoning_tokens, 481);
+    // Turn one's tool round ran; only the conclusion changed.
+    assert!(events.iter().any(|e| matches!(
+        e,
+        craft_runtime::RuntimeEvent::ToolResult { is_error, .. } if !*is_error
+    )));
 }
 
 #[tokio::test]
@@ -176,7 +245,7 @@ async fn incomplete_usage_never_silently_passes_the_budget_check() {
 }
 
 #[tokio::test]
-async fn incomplete_usage_on_a_finishing_turn_flags_but_completes() {
+async fn incomplete_usage_on_a_finishing_turn_fails_closed() {
     let provider = FakeProvider::new(vec![text_turn(
         "done",
         StopReason::EndTurn,
@@ -189,6 +258,8 @@ async fn incomplete_usage_on_a_finishing_turn_flags_but_completes() {
     );
     let (outcome, _) = run_collect(&runner, "finish").await;
 
-    assert_eq!(outcome.exit_code(), 0);
+    assert_eq!(outcome.exit_code(), 3);
+    assert_eq!(outcome.category, CancelCategory::Budget);
+    assert!(outcome.detail.contains("incomplete"));
     assert!(outcome.usage.incomplete);
 }

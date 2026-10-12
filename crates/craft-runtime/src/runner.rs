@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use craft_core::events::TurnCaps;
 use craft_core::provider::Provider;
-use craft_core::types::{ChatMessage, ModelRequest, ToolSpec, Usage};
+use craft_core::types::{ChatMessage, Usage};
 use craft_tools::{Registry, ToolCtx};
 
 use crate::budget::{budget_status, sum_usage, zero_usage};
@@ -16,13 +16,15 @@ use crate::call::{Flow, STATIONARY_DETAIL, abandon_calls, execute_calls};
 use crate::events::{CancelCategory, RuntimeEvent};
 use crate::guard::Stationarity;
 use crate::outcome::{ExitStatus, RunOutcome};
+use crate::prepare::{Prepared, prepare};
+use crate::request;
 use crate::retry;
-use crate::session::{Session, SessionError};
 use crate::step::{StepCtx, StepStop};
 
 /// Typed run knobs. Defaults mirror the digest mission: 40 turns, 4M
 /// total tokens. Env and CLI wiring stay in the app layer, except the
-/// step bound, which resolves its own knob when unset.
+/// step bound and the result window, which resolve their own knobs
+/// when unset.
 #[derive(Debug, Clone)]
 pub struct RunConfig {
     pub system: Option<String>,
@@ -35,6 +37,10 @@ pub struct RunConfig {
     /// Total attempts per model step after a mid-stream death; None
     /// resolves `CRAFT_AGENT_STEP_RETRIES` (default 3).
     pub step_attempts: Option<u32>,
+    /// Turns of tool results kept verbatim in the assembled prompt;
+    /// None resolves `CRAFT_AGENT_RESULT_WINDOW_TURNS` (default 20,
+    /// 0 disables trimming).
+    pub result_window_turns: Option<u32>,
     pub turn_caps: TurnCaps,
     /// Outer bound on a stalled event stream; None disables it.
     pub idle_timeout: Option<Duration>,
@@ -51,6 +57,7 @@ impl RunConfig {
             max_total_tokens: 4_000_000,
             max_tokens: 8192,
             step_attempts: None,
+            result_window_turns: None,
             turn_caps: TurnCaps::default(),
             idle_timeout: None,
             workspace_root,
@@ -94,31 +101,22 @@ impl<P: Provider + Send + Sync> Runner<P> {
                 }
             },
         };
-        let mut session = match self.open_session() {
-            Ok(session) => session,
-            Err(err) => {
+        let Prepared {
+            result_window,
+            mut session,
+        } = match prepare(&self.config, prompt) {
+            Ok(prepared) => prepared,
+            Err(detail) => {
                 return self.finish(
                     &mut sink,
                     ExitStatus::Error,
                     CancelCategory::Error,
-                    err.to_string(),
+                    detail,
                     zero_usage(),
                     0,
                 );
             }
         };
-        if let Err(err) = session.append(ChatMessage::User {
-            text: String::from(prompt),
-        }) {
-            return self.finish(
-                &mut sink,
-                ExitStatus::Error,
-                CancelCategory::Error,
-                err.to_string(),
-                zero_usage(),
-                0,
-            );
-        }
         let ctx = ToolCtx::new(self.config.workspace_root.clone());
         let mut total = zero_usage();
         let mut guard = Stationarity::default();
@@ -140,7 +138,7 @@ impl<P: Provider + Send + Sync> Runner<P> {
             let folded = match self
                 .step_ctx()
                 .drive(
-                    self.build_request(&session),
+                    request::build(&self.config, &self.registry, &session, result_window),
                     turn,
                     &mut sink,
                     &mut total,
@@ -189,6 +187,14 @@ impl<P: Provider + Send + Sync> Runner<P> {
                     turn,
                 );
             }
+            if let Some(detail) = budget_status(&total, self.config.max_total_tokens) {
+                let (exit, category, reason) =
+                    match abandon_calls(&mut session, &folded.tool_calls, &detail) {
+                        Ok(()) => (ExitStatus::Budget, CancelCategory::Budget, detail),
+                        Err(err) => (ExitStatus::Error, CancelCategory::Error, err.to_string()),
+                    };
+                return self.finish(&mut sink, exit, category, reason, total, turn);
+            }
             if folded.tool_calls.is_empty() {
                 let detail = String::from("run completed");
                 return self.finish(
@@ -199,14 +205,6 @@ impl<P: Provider + Send + Sync> Runner<P> {
                     total,
                     turn,
                 );
-            }
-            if let Some(detail) = budget_status(&total, self.config.max_total_tokens) {
-                let (exit, category, reason) =
-                    match abandon_calls(&mut session, &folded.tool_calls, &detail) {
-                        Ok(()) => (ExitStatus::Budget, CancelCategory::Budget, detail),
-                        Err(err) => (ExitStatus::Error, CancelCategory::Error, err.to_string()),
-                    };
-                return self.finish(&mut sink, exit, category, reason, total, turn);
             }
             match execute_calls(
                 &self.registry,
@@ -261,36 +259,6 @@ impl<P: Provider + Send + Sync> Runner<P> {
             idle_timeout: self.config.idle_timeout,
             turn_caps: self.config.turn_caps,
             max_total_tokens: self.config.max_total_tokens,
-        }
-    }
-
-    /// The next request: the full model-visible transcript plus the
-    /// registry's cached tool specs, so replayed native blocks ride
-    /// their assistant messages verbatim.
-    fn build_request(&self, session: &Session) -> ModelRequest {
-        let tools = self
-            .registry
-            .names()
-            .iter()
-            .filter_map(|name| self.registry.spec(name))
-            .map(|spec| ToolSpec {
-                name: spec.name.clone(),
-                description: spec.description.clone(),
-                parameters: spec.schema.clone(),
-            })
-            .collect();
-        ModelRequest {
-            system: self.config.system.clone(),
-            messages: session.messages().to_vec(),
-            tools,
-            max_tokens: self.config.max_tokens,
-        }
-    }
-
-    fn open_session(&self) -> Result<Session, SessionError> {
-        match &self.config.session_path {
-            Some(path) => Session::open(path.clone()),
-            None => Ok(Session::in_memory()),
         }
     }
 

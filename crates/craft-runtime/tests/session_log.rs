@@ -43,7 +43,7 @@ async fn every_model_visible_message_lands_in_the_log() {
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
     assert_eq!(logged.len(), 4);
-    assert!(matches!(&logged[0], ChatMessage::User { text } if text == "work"));
+    assert!(matches!(&logged[0], ChatMessage::User { text, .. } if text == "work"));
     assert!(
         matches!(&logged[1], ChatMessage::Assistant { tool_calls, .. } if tool_calls.len() == 1)
     );
@@ -89,6 +89,7 @@ async fn native_blocks_replay_into_the_next_request_verbatim() {
     let seeded = vec![
         ChatMessage::User {
             text: String::from("think first"),
+            images: Vec::new(),
         },
         ChatMessage::Assistant {
             text: String::from(""),
@@ -126,6 +127,7 @@ async fn corrupt_line_is_a_typed_error_never_a_panic() {
     let path = session_path("corrupt");
     let good = serde_json::to_string(&ChatMessage::User {
         text: String::from("fine"),
+        images: Vec::new(),
     })
     .unwrap();
     std::fs::write(&path, format!("{good}\nnot json at all\n")).unwrap();
@@ -148,6 +150,7 @@ async fn truncated_final_line_is_a_typed_error() {
     let path = session_path("truncated");
     let good = serde_json::to_string(&ChatMessage::User {
         text: String::from("fine"),
+        images: Vec::new(),
     })
     .unwrap();
     let cut: String = good.chars().take(good.len() / 2).collect();
@@ -196,7 +199,7 @@ async fn a_budget_exit_answers_pending_calls_so_the_record_resumes() {
     assert_eq!(request.messages[..record.len()], record[..]);
     assert!(matches!(
         request.messages.last(),
-        Some(ChatMessage::User { text }) if text == "resume"
+        Some(ChatMessage::User { text, .. }) if text == "resume"
     ));
 }
 
@@ -205,6 +208,7 @@ async fn torn_tail_without_newline_is_a_typed_error() {
     let path = session_path("torn");
     let good = serde_json::to_string(&ChatMessage::User {
         text: String::from("fine"),
+        images: Vec::new(),
     })
     .unwrap();
     std::fs::write(&path, good).unwrap();

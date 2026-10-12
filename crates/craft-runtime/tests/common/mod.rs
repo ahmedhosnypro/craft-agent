@@ -87,7 +87,7 @@ pub fn usage(input: u64, output: u64) -> Usage {
     }
 }
 
-/// Usage with the subset buckets set, for budget double-count rows.
+/// Usage with the cache and reasoning buckets set, for budget rows.
 pub fn bucketed_usage(input: u64, output: u64, cache_read: u64, reasoning: u64) -> Usage {
     Usage {
         input_tokens: input,

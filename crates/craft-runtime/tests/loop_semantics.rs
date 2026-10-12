@@ -62,7 +62,7 @@ async fn tool_round_trip_feeds_result_back_and_finishes() {
         tool_calls, ..
     } if tool_calls.len() == 1));
     assert!(matches!(&second[2], ChatMessage::Tool {
-        call_id, is_error, content,
+        call_id, is_error, content, ..
     } if call_id == "call-1" && !*is_error && content == "tool output"));
 
     // Stream-json saw the tool call, the result, and a clean finish.

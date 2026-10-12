@@ -39,7 +39,7 @@ fn triple_tool_turn() -> Turn {
 fn nudge_count(messages: &[ChatMessage]) -> usize {
     messages
         .iter()
-        .filter(|m| matches!(m, ChatMessage::User { text } if text.contains("repeated")))
+        .filter(|m| matches!(m, ChatMessage::User { text, .. } if text.contains("repeated")))
         .count()
 }
 
@@ -65,7 +65,7 @@ async fn fourth_identical_call_injects_a_nudge_user_message() {
     assert_eq!(nudge_count(&requests[4].messages), 1);
     assert!(matches!(
         requests[4].messages.last(),
-        Some(ChatMessage::User { text }) if text.contains("repeated")
+        Some(ChatMessage::User { text, .. }) if text.contains("repeated")
     ));
     // Earlier requests carry none.
     for request in &requests[..4] {
