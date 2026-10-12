@@ -1,6 +1,7 @@
 //! Neutral model vocabulary and provider contracts shared by the adapters
 //! and the runtime.
 
+pub mod agents;
 pub mod error;
 pub mod events;
 pub mod provider;

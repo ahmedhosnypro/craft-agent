@@ -2,11 +2,13 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use craft_core::agents::AgentFile;
 use craft_runtime::{RunConfig, Runner};
-use craft_tools::Registry;
 
+use crate::agent_select::{RunWatch, registry, resolve, system_prompt};
 use crate::cli::{PromptSource, RunCli};
 use crate::config::{env_from_process, mount_backend, resolve_env_config};
 use crate::error::AppError;
@@ -57,9 +59,13 @@ pub const DEFAULT_SYSTEM_PROMPT: &str = "You are craft-agent, a headless coding 
      output must parse. All GitHub I/O goes through gh.\n\
      \n\
      Hard caps: 2 MiB per read or write, 200 results per glob or grep,\n\
-     64 KiB per script. A failed call returns to you as an error result\n\
-     and the run continues — investigate before the next step. You may\n\
-     issue several calls in one turn; they run in order.\n\
+     64 KiB per script, 256 KiB of output per bash or gh call. Prefer\n\
+     read_file, glob, and grep for reading inside the workspace — their\n\
+     output is smaller, bounded, and structured; batch several probes\n\
+     in one bash call instead of returning whole files.\n\
+     A failed call returns to you as an error result and the run\n\
+     continues — investigate before the next step. You may issue\n\
+     several calls in one turn; they run in order.\n\
      \n\
      # Working discipline\n\
      \n\
@@ -183,11 +189,16 @@ fn read_bounded(
     }
 }
 
-pub fn build_run_config(run: &RunCli, workspace_root: PathBuf, session_path: PathBuf) -> RunConfig {
+pub fn build_run_config(
+    run: &RunCli,
+    agent: Option<&AgentFile>,
+    workspace_root: PathBuf,
+    session_path: PathBuf,
+) -> RunConfig {
     let mut config = RunConfig::new(workspace_root);
-    config.system = Some(DEFAULT_SYSTEM_PROMPT.to_string());
+    config.system = Some(system_prompt(agent));
     config.session_path = Some(session_path);
-    if let Some(max_turns) = run.max_turns {
+    if let Some(max_turns) = run.max_turns.or(agent.and_then(|agent| agent.max_turns)) {
         config.max_turns = max_turns;
     }
     if let Some(max_tokens) = run.max_tokens {
@@ -219,20 +230,51 @@ pub fn execute_run(run: RunCli) -> Result<i32, AppError> {
     let workspace_root =
         std::env::current_dir().map_err(|source| AppError::WorkspaceRoot { source })?;
     let session_path = default_session_path(&workspace_root)?;
-    let run_config = build_run_config(&run, workspace_root, session_path);
+    let agent = match resolve(&run, &workspace_root) {
+        Ok(agent) => agent,
+        Err(error) => {
+            eprintln!("craft-agent: {error}");
+            return Ok(1);
+        }
+    };
+    let run_config = build_run_config(&run, agent.as_ref(), workspace_root, session_path);
     let session_path = run_config.session_path.clone();
-    let registry = Registry::with_builtins(craft_tools::ToolLimits::default());
-    let runner = Runner::new(backend, registry, run_config);
+    let run_registry = registry(agent.as_ref());
+    let runner = Runner::new(backend, run_registry, run_config);
     let (sink, writer) = event_writer::spawn_event_writer(run.output_format)?;
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|source| AppError::AsyncRuntime { source })?;
-    let outcome = runtime.block_on(event_writer::drive(
-        runner.run(&prompt, |event| sink.emit(event)),
-        writer,
-        session_path,
-    ));
+    let outcome = {
+        let deadline = agent.as_ref().and_then(|agent| agent.timeout_secs);
+        let watch = Arc::new(Mutex::new(RunWatch::default()));
+        let driven = async {
+            let run_future = runner.run(&prompt, |event| {
+                RunWatch::record(&watch, &event);
+                sink.emit(event);
+            });
+            tokio::pin!(run_future);
+            let kill = async {
+                match deadline {
+                    Some(secs) => tokio::time::sleep(Duration::from_secs(secs)).await,
+                    None => std::future::pending::<()>().await,
+                }
+            };
+            tokio::pin!(kill);
+            tokio::select! {
+                biased;
+                outcome = &mut run_future => outcome,
+                () = &mut kill => {
+                    let (outcome, event) =
+                        RunWatch::expire(&watch, deadline.unwrap_or(0), session_path.as_deref());
+                    sink.emit(event);
+                    outcome
+                }
+            }
+        };
+        runtime.block_on(event_writer::drive(driven, writer, session_path.clone()))
+    };
     Ok(outcome.exit_code())
 }

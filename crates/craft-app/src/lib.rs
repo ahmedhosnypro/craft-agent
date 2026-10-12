@@ -1,6 +1,7 @@
 //! craft-agent library surface: the CLI logic the binary and the test
 //! corpora share. `main.rs` stays a thin parser-and-dispatch shell.
 
+pub mod agent_select;
 pub mod cli;
 pub mod config;
 pub mod digest_cmd;

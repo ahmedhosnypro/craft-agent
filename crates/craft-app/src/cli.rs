@@ -66,6 +66,13 @@ pub struct RunCli {
     /// Cancel the run after this many idle seconds; default off.
     #[arg(long)]
     pub idle_timeout_secs: Option<u64>,
+    /// Agent profile name from the closest .craft-agent/agents; the
+    /// file's body becomes the system prompt.
+    #[arg(long, conflicts_with = "agent_file")]
+    pub agent: Option<String>,
+    /// One agent file used directly; an invalid file fails the run.
+    #[arg(long)]
+    pub agent_file: Option<PathBuf>,
 }
 
 #[derive(clap::Args, Debug)]
