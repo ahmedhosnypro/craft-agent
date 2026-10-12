@@ -85,8 +85,10 @@ The sensitive-path predicate is a pure function of the resolved path,
 checked per call against every component — nothing is cached. It
 denies: cloud credential directories (`.aws`, `.gcp`), environment
 files (any `.env*` except the exact spellings `.env.example`,
-`.env.sample`, `.env.template`), private key files (`id_rsa*`,
-`id_ed25519*`, `id_ecdsa*`, unless `.pub`), and `credentials*` files.
+`.env.sample`, `.env.template`), private key and token files (`id_rsa*`,
+`id_dsa*`, `id_ed25519*`, `id_ecdsa*`, and any name ending `.pem`,
+`.key`, `.netrc`, or `.npmrc`, unless it ends `.pub`), and
+`credentials*` files.
 
 A denial is run-fatal, not a tool result: `SensitivePath` and
 `EscapesWorkspace` abort the run through the exit-4 family, while every
@@ -106,15 +108,23 @@ pass through in order.
 (`RunConfig`): a system prompt, the turn cap (default 40), the total
 token budget (default 4 000 000), the per-request output cap forwarded
 to the provider (default 8192), turn caps for the fold, an optional
-idle timeout over a stalled stream, the workspace root, and the session
+idle timeout over a stalled stream, the step-attempt bound (default 3,
+env `CRAFT_AGENT_STEP_RETRIES`), the workspace root, and the session
 path. Each turn:
 
 1. The runner builds the next request from the full session record
    plus the registry's cached tool specs, and streams it through the
    provider, forwarding text deltas as events and folding the stream
-   into one turn (the idle timeout bounds a stalled stream).
-2. A folded turn with neither text nor tool calls is `EmptyResponse` —
-   a zero-content terminal stop is an error, never success.
+   into one turn (the idle timeout bounds a stalled stream). A stream
+   that dies mid-turn replays the step: the partial fold is discarded,
+   the same request is resent up to the step-attempt bound, and every
+   replay emits a `turn_retried` event. Failures that surfaced before
+   the stream — the provider's connect ladder already retried them —
+   and deterministic classes (auth, invalid request, context window,
+   payload size, quota) never replay.
+2. A folded turn with neither text nor tool calls replays the same
+   way, unless the provider filtered it: a zero-content terminal stop
+   is an error, never success.
 3. Usage is summed into the run total and the assistant turn is
    appended to the session.
 4. A turn with no tool calls ends the run: completed, exit 0.
@@ -135,7 +145,10 @@ the fold), and the `incomplete` flag ORs across turns. Spent means
 input + output + cache-read + cache-write + reasoning tokens. Two
 outcomes, both exit 3: the spend reached the budget, or the budget
 cannot be verified because the provider reported incomplete usage — an
-unverifiable budget is never treated as unspent.
+unverifiable budget is never treated as unspent. Replays keep their
+usage charged: an empty-but-complete attempt adds its usage to the run
+total before the step replays, and a replay the budget can no longer
+fund ends the run with the same exit 3 instead of firing.
 
 ## Stationarity
 
@@ -169,6 +182,7 @@ per line, tagged by `type`:
 |---|---|
 | `turn_started` | `turn` |
 | `assistant_delta` | `turn`, `text` |
+| `turn_retried` | `turn`, `attempt`, `reason` |
 | `tool_call` | `turn`, `index`, `id`, `name`, `arguments` |
 | `tool_progress` | `turn`, `name`, `stream` (`stdout` or `stderr`), `text` |
 | `tool_result` | `turn`, `call_id`, `name`, `is_error`, `content` |
@@ -178,4 +192,9 @@ per line, tagged by `type`:
 `run_finished` is always the last line; its `exit_code` doubles as the
 process exit code, and `category` carries the cancellation taxonomy:
 `completed`, `error`, `max_turns`, `stationarity`, `budget`,
-`sensitive_path`, `escapes_workspace`.
+`sensitive_path`, `escapes_workspace`. A `turn_retried` line marks a
+replayed model step: the assistant text the run already streamed for
+that turn since its previous boundary is void, `attempt` is the 1-based
+number of the failed attempt, and `reason` is a stable token —
+`stream_closed`, `transport`, `transient`, `timeout`, `idle_timeout`,
+`rate_limit`, or `empty_response`.

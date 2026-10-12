@@ -38,7 +38,8 @@ re-parsing.
 | Output | Meaning |
 |---|---|
 | `conclusion` | `success`, `error`, `max-turns`, `budget`, or `denied` — the exit-code taxonomy. |
-| `final-message` | The final assistant message from the terminal stream-json event. |
+| `exit-code` | The mission command's typed exit code (0, 2, 3, 4, or an unmapped failure code); `conclusion` is its named form. |
+| `final-message` | The terminal detail from the `run_finished` stream-json event. |
 | `digest-path` | The digest markdown path; set for the digest mission on success only. |
 
 The stream-json transcript lands in `$RUNNER_TEMP/craft-agent-stream.jsonl`
@@ -83,11 +84,13 @@ so the split is also a credential boundary:
   appends a dated failure-note **comment** and never touches the body or
   its window marker. A red run is never silent.
 
-The window: the digest job derives `--since` from the sticky issue's
-`digest-window` marker (fallback 24h when missing or malformed, clamped
-to 30 days), so delayed or skipped crons never lose coverage. A manual
-dispatch can override `since` and can run with `dry-run` to publish
-nothing at all.
+The window: the digest job derives a window start from the sticky
+issue's `digest-window` marker — the marker's end date, clamped to 30
+days, with a 24-hour fallback when the marker is missing or malformed —
+and forwards it to the action's `args`. The binary parses `--since` as
+a relative look-back (`<n><s|m|h|d>`); a manual dispatch can pass one
+explicitly to bypass the marker, and `dry-run` publishes nothing at
+all.
 
 ## The schedule guard
 

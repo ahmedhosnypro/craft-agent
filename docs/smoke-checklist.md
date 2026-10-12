@@ -74,7 +74,7 @@ minute; `timeout-minutes: 10` bounds any hang.
 - Re-dispatch the smoke with the default `version: v1` to prove the
   moving tag resolves to the just-published release.
 - External-consumer readiness: another repository can now use the action
-  pinned at `uses: storytold/craft-agent@v1` (docs tell consumers to
+  pinned at `uses: ahmedhosnypro/craft-agent@v1` (docs tell consumers to
   full-SHA-pin) with its own provider key mapped in step `env` — the
   in-repo smoke having proven the download, checksum, mission, and
   output contract it will rely on.

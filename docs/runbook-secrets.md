@@ -1,8 +1,9 @@
 # Runbook — secrets, variables, enable and rollback
 
 Everything the workflows read from the environment lives in repository
-settings on `storytold/craft-agent`: **Actions secrets** for values that
-must never print, and **Actions variables** for plain configuration. Set
+settings on `ahmedhosnypro/craft-agent`: **Actions secrets** for values
+that must never print, and **Actions variables** for plain
+configuration. Set
 values through the settings UI; never paste a value into an issue, a
 dispatch input, or a log.
 

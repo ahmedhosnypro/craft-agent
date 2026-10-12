@@ -49,15 +49,15 @@ Requirements: a Rust toolchain — rustup provisions the pinned channel in
 [just](https://github.com/casey/just).
 
 ```sh
-git clone https://github.com/storytold/craft-agent
+git clone https://github.com/ahmedhosnypro/craft-agent
 cd craft-agent
 just check
 ```
 
-`just check` is the full gate — eleven stages: fmt, clippy, the keyless
-test corpus, both scanners with their selftests, file length, cargo
-deny, cargo machete, and a locked build. Nothing is done until it is
-green.
+`just check` is the full gate — thirteen stages: fmt, clippy, the
+keyless test corpus, both scanners with their selftests, file length,
+agent-file validation with its selftest, cargo deny, cargo machete, and
+a locked build. Nothing is done until it is green.
 
 ## Live corpora
 
@@ -90,7 +90,7 @@ The repo ships `action.yml`, a composite Action that downloads the release
 binary for the runner triple, sha256-verifies it, and runs one mission:
 
 ```yaml
-- uses: storytold/craft-agent@<pinned-sha>
+- uses: ahmedhosnypro/craft-agent@<pinned-sha>
   with:
     mission: digest
     provider: openai

@@ -23,13 +23,13 @@ and the CLI in `crates/craft-app` drives them.
 ## Window math
 
 `--since` is a relative look-back — `<n><s|m|h|d>`, default `24h`, never
-wider than `366d`. The digest stamps its final line with the window
-marker `<!-- digest-window: <start>..<end> -->`, and the next run derives
-its look-back from that marker, so delayed or skipped crons never lose
-coverage. A missing, malformed, or hostile marker falls back to the last
-24 hours, and a marker-derived window is clamped to 30 days — a stale
-issue cannot balloon one run into a quarter. A manual dispatch passes
-`--since` explicitly and overrides the chain.
+wider than `366d`. The binary resolves it to a UTC day window: a span
+under a day resolves to the last UTC day, and every window is clamped
+to 30 days. The digest stamps its final line with the window marker
+`<!-- digest-window: <start>..<end> -->`, the durable record of the
+window the run covered; the cross-run derivation that reads the marker
+is the workflow's ([05-action.md](05-action.md)), not this command's. A
+manual dispatch passes `--since` explicitly.
 
 ## Collectors
 
@@ -37,13 +37,13 @@ The repo set is the committed curated list (`config/digest-repos.txt`) —
 never `gh repo list`, which would sweep in archived and legacy
 repositories. `--repos` narrows the set for a manual run.
 
-- **Merged PRs** — `gh pr list -R <org>/<repo> --state merged` with a
-  `merged:>=<since>` search filter, one query per repository, `--limit
-  200`, JSON output (number, title, url, author, mergedAt, additions,
-  deletions, labels, body). Per-repo looping keeps each query inside the
-  search API's result caps; roughly two calls per repository per day
-  sits well inside the quota. PR bodies are truncated to a bounded
-  prefix before entering the bundle.
+- **Merged PRs** — one `gh pr list -R <org>/<repo> --state merged`
+  query per repository, `--limit 201`, JSON output (number, title, url,
+  author, mergedAt, additions, deletions, labels, body). The window
+  filter runs client-side over the newest 201 merged PRs; a page that
+  fills records a row-limit error row and keeps the newest. One query
+  per repository per run sits well inside the quota. PR bodies are
+  truncated to a bounded prefix before entering the bundle.
 - **Source trees** — each repository shallow-clones (`--depth 1`) into a
   scratch dir, feeding the copy-paste detector and the per-repo AGENTS.md
   reads; far inside a runner's disk budget.
@@ -89,8 +89,8 @@ cross-repo patterns, duplicate-code candidates with links, the
 collection-error rows, and a usage footer.
 
 Its final line is the window marker — `<!-- digest-window:
-<start>..<end> -->` — the durable state the next run derives its window
-from. Before anything leaves the binary the digest is scrubbed against
+<start>..<end> -->` — the durable record of the window the run covered.
+Before anything leaves the binary the digest is scrubbed against
 the secret-pattern set, so a key that leaked into model output never
 reaches the issue. A run state record — digest path, window, usage —
 rides alongside; the window chain itself lives in the issue marker,

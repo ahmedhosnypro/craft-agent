@@ -76,7 +76,7 @@ The process speaks a five-value taxonomy (`craft-runtime` `ExitStatus`):
 
 | Code | Status | Meaning |
 |---|---|---|
-| 0 | `Ok` | The run completed; the terminal stream-json event carries the final message. |
+| 0 | `Ok` | The run completed; the terminal stream-json event carries the one-line outcome detail. |
 | 1 | `Error` | Any failure the run could not convert into motion: provider, session, or configuration failures. |
 | 2 | `MaxTurns` or `Stationarity` | The motion budget ran out — the turn cap was reached, or the stationarity guard stopped a run that stopped making progress. The cancellation category distinguishes the two. |
 | 3 | `Budget` | The token budget failed closed: exhausted, or unverifiable because the provider reported incomplete usage. |
@@ -94,7 +94,8 @@ the loop: `--prompt` names a file or `-` for stdin, `--output-format`
 selects `stream-json` (the machine contract, the default) or `plain`
 (the human fallback), and the turn cap, token budget, and idle timeout
 are explicit arguments. `digest` builds the suite digest over a bounded
-look-back window. A failure prints one actionable line and exits 1.
+look-back window. A run failure prints one actionable line and exits 1;
+a malformed argument exits 2 with the argument parser's usage text.
 The agent is headless: no TUI, no plugins — one process, NDJSON output,
 the exit-code table above.
 

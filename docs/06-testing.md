@@ -11,13 +11,13 @@ RED first: a feature without its corpus is not a feature.
 
 `cargo test --workspace` runs the whole keyless fixture corpus:
 
-| Crate | Tests | Surface |
-|-------|-------|---------|
-| `craft-core` | 103 | the neutral vocabulary: request/event types, SSE, retry, usage |
-| `craft-providers` | 120 | the three protocol adapters |
-| `craft-tools` | 92 | the Tool trait and the loop's builtins |
-| `craft-runtime` | 22 | the run loop, budget caps, stream-json output |
-| `craft-app` | 44 | the CLI surface |
+| Crate | Surface |
+|-------|---------|
+| `craft-core` | the neutral vocabulary: request/event types, SSE, retry, usage |
+| `craft-providers` | the three protocol adapters |
+| `craft-tools` | the Tool trait and the loop's builtins |
+| `craft-runtime` | the run loop, budget caps, stream-json output |
+| `craft-app` | the CLI surface |
 
 Four shapes recur across every corpus:
 

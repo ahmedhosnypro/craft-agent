@@ -54,7 +54,18 @@ so a hostile server cannot balloon the process. Provider host literals
 are adapter data: they are allowed only under `crates/craft-providers/`
 (enforced by `scripts/identifier-scan.sh`).
 
-## The retry ladder
+## The two retry ladders
+
+Retries live at exactly one level per failure. The connect ladder,
+inside each adapter, replays the HTTP POST before any byte is decoded;
+the step ladder, in the runtime, replays a whole model step after its
+stream died mid-turn. The seam splits the levels structurally: a
+failure surfacing from `stream()` is connect-phase and already climbed
+the adapter ladder, so the runtime never replays it again — only a
+death inside a connected stream, or an empty-but-complete turn, is the
+step ladder's to replay.
+
+### Connect ladder (per request)
 
 One shared ladder (`craft-core` constants), mounted identically by all
 three adapters:
@@ -70,6 +81,25 @@ Only `RateLimit`, `Transient`, and `Transport` retry: authentication and
 client errors fail fast. A `Retry-After` header (delta-seconds form
 only; HTTP-date and junk fall back to the ladder) overrides the
 computed backoff, clamped to the cap.
+
+### Step ladder (per model step)
+
+`CRAFT_AGENT_STEP_RETRIES` bounds the total attempts per step: the
+default is 3, `0` restores fail-fast (one attempt), and an unparseable
+value is a typed error naming the knob. A replay discards the partial
+fold and resends the same request from the intact transcript. Backoff
+doubles from 500 ms, capped at 32 s with ±25 % jitter; a live
+`Retry-After` (delta-seconds form) replaces the backoff, clamped to the
+cap.
+
+Replayed: `Transport`, `Transient`, `Timeout`, `IdleTimeout`,
+`StreamClosed`, a mid-stream `RateLimit`, and an empty-but-complete
+turn (`EmptyResponse`) unless its terminal is `ContentFilter`. Never
+replayed: `Auth`, `InvalidRequest`, `ContextWindow`, `PayloadTooLarge`,
+`QuotaExhausted`, a filtered empty turn, and every fold failure — a
+malformed response is semantic, not transient. Each replay emits a
+`turn_retried` stream-json event and charges its usage to the run
+budget before the next attempt fires.
 
 ## The decode lane
 
@@ -130,13 +160,16 @@ boundary:
 ## Error taxonomy
 
 A closed set (`craft-core` `ProviderError`): `Auth`, `RateLimit`
-(carrying the live `Retry-After`), `Transient`, `PayloadTooLarge`,
-`ContextWindow`, `InvalidRequest`, `Transport`, `IdleTimeout`,
-`StreamClosed`, and `EmptyResponse`. HTTP classification is shared:
-401/403 → `Auth`; 429 → `RateLimit`; 413 → `PayloadTooLarge`; 5xx and
-408 → `Transient`; other 4xx → `InvalidRequest`; anything else →
-`Transport`. Body-driven refinements run before the taxonomy closes —
-a context-window rejection riding a plain 400 is `ContextWindow`:
+(carrying the live `Retry-After`), `QuotaExhausted`, `Transient`,
+`PayloadTooLarge`, `ContextWindow`, `InvalidRequest`, `Transport`,
+`IdleTimeout`, `StreamClosed`, and `EmptyResponse`. HTTP classification
+is shared: 401/403 → `Auth`; 429 → `RateLimit`; 413 →
+`PayloadTooLarge`; 5xx and 408 → `Transient`; other 4xx →
+`InvalidRequest`; anything else → `Transport`. Body-driven refinements
+run before the taxonomy closes — a context-window rejection riding a
+plain 400 is `ContextWindow`, and an `insufficient_quota`-shaped error
+(code, type, or message) is `QuotaExhausted`: a spent quota is
+deterministic and fails fast instead of riding a ladder.
 
 - OpenAI: an error code or message containing `context_length` /
   `context length`.
@@ -149,7 +182,8 @@ envelope) map onto the same taxonomy:
 
 | Wire kind | Taxonomy |
 |---|---|
-| OpenAI `rate_limit`, code `insufficient_quota` | `RateLimit` |
+| OpenAI `rate_limit` | `RateLimit` |
+| OpenAI `insufficient_quota` (code, type, or message) | `QuotaExhausted` |
 | OpenAI `server_error`, `service_unavailable` | `Transient` |
 | OpenAI `invalid_request_error` | `InvalidRequest` |
 | OpenAI `authentication_error`, `permission_error` | `Auth` |

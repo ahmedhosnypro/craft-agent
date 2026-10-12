@@ -41,7 +41,7 @@ fallback covers the gap.
 
 ## Store the credentials
 
-Add two repository secrets on `storytold/craft-agent`
+Add two repository secrets on `ahmedhosnypro/craft-agent`
 (see `docs/runbook-secrets.md` for the full checklist):
 
 - `CRAFT_AGENT_APP_CLIENT_ID` — the Client ID from the App page.
