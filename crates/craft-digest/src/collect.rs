@@ -3,10 +3,12 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::Duration;
 
 use serde_json::Value;
 
 use crate::bundle::Bundle;
+use crate::clone_runner::{BoundedRun, run_with_deadline};
 use crate::error::{DigestError, bounded};
 use crate::sanitize::sanitize;
 use crate::window::{Window, is_valid_date};
@@ -17,6 +19,8 @@ pub const PR_BODY_PREFIX_BYTES: usize = 2000;
 pub const MAX_PRS_PER_REPO: usize = 30;
 /// gh row limit; a full page may hide older PRs and is recorded as such.
 pub const GH_ROW_LIMIT: usize = 201;
+/// Wall-clock bound for one gh call; expiry becomes an error row.
+pub const GH_CALL_DEADLINE: Duration = Duration::from_secs(120);
 const MAX_LABELS: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +38,7 @@ pub struct PrRecord {
 
 pub struct GhRunner {
     program: PathBuf,
+    deadline: Duration,
 }
 
 impl Default for GhRunner {
@@ -46,6 +51,7 @@ impl GhRunner {
     pub fn new() -> Self {
         GhRunner {
             program: PathBuf::from("gh"),
+            deadline: GH_CALL_DEADLINE,
         }
     }
 
@@ -53,7 +59,14 @@ impl GhRunner {
     pub fn with_program(program: impl Into<PathBuf>) -> Self {
         GhRunner {
             program: program.into(),
+            deadline: GH_CALL_DEADLINE,
         }
+    }
+
+    /// Tests shorten the bound to exercise expiry.
+    pub fn with_deadline(mut self, deadline: Duration) -> Self {
+        self.deadline = deadline;
+        self
     }
 }
 
@@ -79,19 +92,21 @@ fn truncate_prefix(text: &str, cap_bytes: usize) -> String {
 }
 
 /// Parse `gh pr list --json` rows; untrusted, capped at GH_ROW_LIMIT rows.
-pub fn parse_pr_rows(output: &str) -> Result<Vec<PrRecord>, DigestError> {
+/// Returns the parsed records and the page's raw row count.
+pub fn parse_pr_rows(output: &str) -> Result<(Vec<PrRecord>, usize), DigestError> {
     let value: Value = serde_json::from_str(output)
         .map_err(|err| DigestError::GhOutput(bounded(&err.to_string())))?;
     let rows = value
         .as_array()
         .ok_or_else(|| DigestError::GhOutput(bounded("expected a JSON array of PR rows")))?;
+    let raw_rows = rows.len();
     let mut prs = Vec::new();
     for row in rows.iter().take(GH_ROW_LIMIT) {
         if let Some(record) = parse_row(row) {
             prs.push(record);
         }
     }
-    Ok(prs)
+    Ok((prs, raw_rows))
 }
 
 /// Rows missing number/title/url are dropped; the rest fall back safely.
@@ -154,7 +169,8 @@ pub fn collect_all(runner: &GhRunner, org: &str, repos: &[String], window: &Wind
 }
 
 fn collect_repo(runner: &GhRunner, org: &str, repo: &str, window: &Window, bundle: &mut Bundle) {
-    let output = Command::new(&runner.program)
+    let mut command = Command::new(&runner.program);
+    command
         .arg("pr")
         .arg("list")
         .arg("-R")
@@ -164,32 +180,44 @@ fn collect_repo(runner: &GhRunner, org: &str, repo: &str, window: &Window, bundl
         .arg("--limit")
         .arg(GH_ROW_LIMIT.to_string())
         .arg("--json")
-        .arg("number,title,url,author,mergedAt,additions,deletions,labels,body")
-        .output();
-    let output = match output {
-        Ok(output) => output,
+        .arg("number,title,url,author,mergedAt,additions,deletions,labels,body");
+    let run = match run_with_deadline(&mut command, runner.deadline) {
+        Ok(run) => run,
         Err(err) => {
             bundle.push_error(repo, "gh", &err.to_string());
             bundle.push_repo(repo.to_string(), Vec::new());
             return;
         }
     };
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bundle.push_error(repo, "gh", &stderr);
-        bundle.push_repo(repo.to_string(), Vec::new());
-        return;
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let prs = match parse_pr_rows(&stdout) {
-        Ok(prs) => prs,
+    let stdout = match run {
+        BoundedRun::Completed {
+            status,
+            stdout,
+            stderr,
+        } => {
+            if !status.success() {
+                bundle.push_error(repo, "gh", &String::from_utf8_lossy(&stderr));
+                bundle.push_repo(repo.to_string(), Vec::new());
+                return;
+            }
+            String::from_utf8_lossy(&stdout).into_owned()
+        }
+        BoundedRun::Expired => {
+            let message = format!("gh call exceeded its {:?} deadline", runner.deadline);
+            bundle.push_error(repo, "gh", &message);
+            bundle.push_repo(repo.to_string(), Vec::new());
+            return;
+        }
+    };
+    let (prs, raw_rows) = match parse_pr_rows(&stdout) {
+        Ok(parsed) => parsed,
         Err(err) => {
             bundle.push_error(repo, "gh-output", &err.to_string());
             bundle.push_repo(repo.to_string(), Vec::new());
             return;
         }
     };
-    if prs.len() >= GH_ROW_LIMIT {
+    if raw_rows >= GH_ROW_LIMIT {
         bundle.push_error(repo, "pr-list", "row limit reached; newest kept");
     }
     let mut in_window: Vec<PrRecord> = prs

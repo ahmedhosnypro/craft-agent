@@ -37,7 +37,14 @@ pub fn render_digest(bundle: &Bundle) -> String {
             }
         }
     }
-    body.push_str("\n## Cross-repo patterns\n\n_(cross-repo analysis runs in the agent turn)_\n");
+    let analysis = suite_analysis(bundle);
+    if analysis.is_empty() {
+        body.push_str("\n## Suite analysis\n\n_(the model turn produced no analysis)_\n");
+    } else {
+        body.push_str("\n## Suite analysis\n\n");
+        body.push_str(analysis);
+        body.push('\n');
+    }
     if !bundle.duplicates.is_empty() {
         body.push_str("\n## Duplicate-code candidates\n");
         for dup in &bundle.duplicates {
@@ -99,4 +106,14 @@ fn site_link(org: &str, site: &CloneSite) -> String {
         site.repo, site.file, site.line
     );
     format!("[{}/{}:{}]({url})", site.repo, site.file, site.line)
+}
+
+/// The model turn's answer, mirrored into every repo row; rendered once.
+fn suite_analysis(bundle: &Bundle) -> &str {
+    for repo in &bundle.repos {
+        if !repo.agents_excerpt.is_empty() {
+            return &repo.agents_excerpt;
+        }
+    }
+    ""
 }

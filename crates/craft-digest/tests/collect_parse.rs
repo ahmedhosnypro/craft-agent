@@ -5,6 +5,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
+use std::time::Duration;
 
 /// The fake-gh tests write a script and exec it immediately; a parallel
 /// fork in another test can inherit the still-open write fd and fail the
@@ -38,7 +39,8 @@ const GH_ROWS: &str = r#"[
 
 #[test]
 fn parses_all_pr_row_fields() {
-    let prs = parse_pr_rows(GH_ROWS).unwrap();
+    let (prs, raw_rows) = parse_pr_rows(GH_ROWS).unwrap();
+    assert_eq!(raw_rows, 3);
     assert_eq!(prs.len(), 3);
 
     let first: &PrRecord = &prs[0];
@@ -149,7 +151,7 @@ fn pr_body_is_truncated_to_bounded_prefix() {
     let json = format!(
         r#"[{{"number":1,"title":"t","url":"u","author":null,"mergedAt":"2026-10-02T00:00:00Z","additions":1,"deletions":0,"labels":null,"body":"{long}"}}]"#
     );
-    let prs = parse_pr_rows(&json).unwrap();
+    let (prs, _) = parse_pr_rows(&json).unwrap();
     assert!(prs[0].body.len() <= PR_BODY_PREFIX_BYTES);
     assert_eq!(prs[0].body, long[..PR_BODY_PREFIX_BYTES]);
 
@@ -157,14 +159,14 @@ fn pr_body_is_truncated_to_bounded_prefix() {
     let json = format!(
         r#"[{{"number":2,"title":"t","url":"u","mergedAt":"2026-10-02T00:00:00Z","body":"{wide}"}}]"#
     );
-    let prs = parse_pr_rows(&json).unwrap();
+    let (prs, _) = parse_pr_rows(&json).unwrap();
     assert_eq!(prs[0].body.chars().count(), 1000);
 }
 
 #[test]
 fn hostile_rows_fall_back_to_safe_values() {
     let json = r#"[{"number":8,"title":"ok","url":"u","author":null,"mergedAt":"2026-10-03T00:00:00Z","additions":null,"deletions":null,"labels":null,"body":null}]"#;
-    let prs = parse_pr_rows(json).unwrap();
+    let (prs, _) = parse_pr_rows(json).unwrap();
     assert_eq!(prs.len(), 1);
     assert_eq!(prs[0].number, 8);
     assert_eq!(prs[0].author, "unknown");
@@ -183,7 +185,7 @@ fn rows_missing_essentials_are_dropped() {
  {"number":11,"title":"no url","mergedAt":"2026-10-02T00:00:00Z"},
  {"number":12,"title":"no mergedAt","url":"u"}
 ]"#;
-    let prs = parse_pr_rows(json).unwrap();
+    let (prs, _) = parse_pr_rows(json).unwrap();
     assert_eq!(prs.len(), 1);
     assert_eq!(prs[0].number, 12);
     assert_eq!(prs[0].title, "no mergedAt");
@@ -269,7 +271,50 @@ fn collected_text_is_sanitized_into_the_bundle() {
         r"\u0007",
         r#"sible","url":"u","mergedAt":"2026-10-02T00:00:00Z","body":"<!-- hidden --> show"}]"#
     );
-    let prs = parse_pr_rows(json).unwrap();
+    let (prs, _) = parse_pr_rows(json).unwrap();
     assert_eq!(prs[0].title, "visible");
     assert_eq!(prs[0].body, " show");
+}
+
+#[test]
+fn gh_call_deadline_records_error_row() {
+    let _guard = script_guard();
+    let dir = tmp_dir("collect-deadline");
+    let gh = fake_gh(&dir, "sleep 30");
+    let runner = GhRunner::with_program(gh).with_deadline(Duration::from_millis(200));
+    let bundle = collect_all(&runner, "storytold", &["alpha".to_string()], &win());
+    assert_eq!(bundle.repos.len(), 1);
+    assert_eq!(bundle.repos[0].merged_prs.len(), 0);
+    assert_eq!(bundle.errors.len(), 1);
+    assert_eq!(bundle.errors[0].repo, "alpha");
+    assert_eq!(bundle.errors[0].stage, "gh");
+    assert!(bundle.errors[0].message.contains("deadline"));
+}
+
+#[test]
+fn full_page_with_dropped_rows_still_records_the_cap() {
+    let _guard = script_guard();
+    let rows: Vec<String> = (1..=201)
+        .map(|n| {
+            if n % 10 == 0 {
+                r#"{"number":9999,"title":"no url"}"#.to_string()
+            } else {
+                format!(
+                    r#"{{"number":{n},"title":"t","url":"u","mergedAt":"2026-10-05T00:00:00Z","body":""}}"#
+                )
+            }
+        })
+        .collect();
+    let json = format!("[{}]", rows.join(","));
+    let dir = tmp_dir("collect-cap-dropped");
+    let gh = fake_gh(&dir, &format!("echo '{json}'"));
+    let bundle = collect_all(
+        &GhRunner::with_program(gh),
+        "storytold",
+        &["alpha".to_string()],
+        &win(),
+    );
+    assert_eq!(bundle.repos[0].merged_prs.len(), 30);
+    assert_eq!(bundle.errors.len(), 1);
+    assert_eq!(bundle.errors[0].stage, "pr-list");
 }

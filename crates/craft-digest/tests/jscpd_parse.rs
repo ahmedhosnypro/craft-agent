@@ -1,3 +1,7 @@
+// Corpus fixtures: unwrap() is the loud-test idiom here.
+#![allow(clippy::unwrap_used)]
+
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use craft_digest::DigestError;
@@ -7,6 +11,15 @@ use craft_digest::jscpd::{
 
 fn fixture_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jscpd-report.json")
+}
+
+fn tmp_dir(name: &str) -> PathBuf {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/tmp/craft-digest-corpus")
+        .join(format!("{name}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    dir
 }
 
 #[test]
@@ -70,6 +83,33 @@ fn oversized_report_is_a_typed_error() {
     let huge = "x".repeat(JSCPD_REPORT_CAP_BYTES + 1);
     assert!(matches!(
         parse_jscpd_report(&huge).unwrap_err(),
+        DigestError::JscpdTooLarge(_)
+    ));
+}
+
+#[test]
+fn top_pairs_come_from_the_whole_report_not_the_first_thousand() {
+    let entries: Vec<String> = (0..1_100)
+        .map(|i| {
+            format!(
+                r#"{{"firstFile":{{"name":"r{i}/a.rs","start":{i}}},"secondFile":{{"name":"r{i}/b.rs","start":{i}}},"tokens":{i},"lines":5}}"#
+            )
+        })
+        .collect();
+    let json = format!(r#"{{"duplicates":[{}]}}"#, entries.join(","));
+    let candidates = parse_jscpd_report(&json).unwrap();
+    assert_eq!(candidates.len(), MAX_DUPLICATE_CANDIDATES);
+    let tokens: Vec<u64> = candidates.iter().map(|c| c.tokens).collect();
+    assert_eq!(tokens, (1080..=1099).rev().collect::<Vec<u64>>());
+}
+
+#[test]
+fn oversized_report_file_is_a_typed_error() {
+    let dir = tmp_dir("jscpd-oversized");
+    let path = dir.join("jscpd-report.json");
+    fs::write(&path, "x".repeat(JSCPD_REPORT_CAP_BYTES + 1)).unwrap();
+    assert!(matches!(
+        read_jscpd_report(&path).unwrap_err(),
         DigestError::JscpdTooLarge(_)
     ));
 }

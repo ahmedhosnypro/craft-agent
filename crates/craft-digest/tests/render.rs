@@ -69,7 +69,8 @@ fn renders_all_sections_with_expected_shapes() {
     assert!(
         out.contains("[#101](https://example.invalid/pr/101) Fix parser - dev1 (+120/-30) `bug`")
     );
-    assert!(out.contains("## Cross-repo patterns"));
+    assert!(out.contains("## Suite analysis"), "{out}");
+    assert!(out.contains("Run `just check` before committing."), "{out}");
     assert!(out.contains("## Duplicate-code candidates"));
     let link_a = "https://github.com/storytold/app-a/blob/HEAD/src/lib.rs#L3";
     let link_b = "https://github.com/storytold/app-b/blob/HEAD/src/main.rs#L2";
@@ -151,4 +152,25 @@ fn no_error_section_when_no_errors() {
     let out = render_digest(&b);
     assert!(!out.contains("## Collection errors"));
     assert!(!out.contains("collection-error"));
+}
+
+#[test]
+fn model_analysis_is_rendered_once_from_the_bundle() {
+    let mut b = sample();
+    let excerpt = b.repos[0].agents_excerpt.clone();
+    b.repos.push(RepoDigest {
+        repo: "second".to_string(),
+        merged_prs: Vec::new(),
+        agents_excerpt: excerpt.clone(),
+    });
+    let out = render_digest(&b);
+    assert_eq!(out.matches(excerpt.as_str()).count(), 1, "{out}");
+}
+
+#[test]
+fn missing_analysis_keeps_a_placeholder() {
+    let mut b = sample();
+    b.repos[0].agents_excerpt = String::new();
+    let out = render_digest(&b);
+    assert!(out.contains("the model turn produced no analysis"), "{out}");
 }

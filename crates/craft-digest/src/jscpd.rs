@@ -1,6 +1,7 @@
 //! jscpd v5 report parsing: recorded reports into bounded clone candidates.
 
-use std::fs;
+use std::fs::File;
+use std::io::Read;
 use std::path::Path;
 
 use serde_json::Value;
@@ -11,7 +12,6 @@ use crate::error::{DigestError, bounded};
 pub const MAX_DUPLICATE_CANDIDATES: usize = 20;
 /// Reports larger than this are rejected before parsing.
 pub const JSCPD_REPORT_CAP_BYTES: usize = 8 * 1024 * 1024;
-const MAX_DUPLICATES_READ: usize = 1000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CloneSite {
@@ -28,9 +28,13 @@ pub struct DuplicateCandidate {
     pub lines: u64,
 }
 
-/// Read a report from disk, byte cap applied before parsing.
+/// Read a report from disk, byte cap applied before allocating.
 pub fn read_jscpd_report(path: &Path) -> Result<Vec<DuplicateCandidate>, DigestError> {
-    let bytes = fs::read(path).map_err(|err| DigestError::Jscpd(bounded(&err.to_string())))?;
+    let file = File::open(path).map_err(|err| DigestError::Jscpd(bounded(&err.to_string())))?;
+    let mut bytes = Vec::new();
+    file.take((JSCPD_REPORT_CAP_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|err| DigestError::Jscpd(bounded(&err.to_string())))?;
     if bytes.len() > JSCPD_REPORT_CAP_BYTES {
         return Err(DigestError::JscpdTooLarge(JSCPD_REPORT_CAP_BYTES));
     }
@@ -49,7 +53,7 @@ pub fn parse_jscpd_report(text: &str) -> Result<Vec<DuplicateCandidate>, DigestE
         .and_then(Value::as_array)
         .ok_or_else(|| DigestError::Jscpd(bounded("missing the duplicates array")))?;
     let mut candidates = Vec::new();
-    for entry in duplicates.iter().take(MAX_DUPLICATES_READ) {
+    for entry in duplicates.iter() {
         if let Some(candidate) = parse_entry(entry) {
             candidates.push(candidate);
         }

@@ -1,5 +1,6 @@
 //! Secret scrubbing: digests never leave the binary carrying a credential.
-//! The pattern set mirrors scripts/scan-secrets.sh.
+//! The families come from scripts/scan-secrets.sh; where its detection
+//! prefix stops, these rules redact the whole credential.
 
 use std::sync::OnceLock;
 
@@ -14,6 +15,16 @@ struct Rule {
 }
 
 const RULES: &[Rule] = &[
+    Rule {
+        // full armored block, header through the END line
+        pattern: r"(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
+        template: SCRUBBED,
+    },
+    Rule {
+        // truncated block: header plus base64-shaped lines, no END line
+        pattern: r"-----BEGIN [A-Z ]*PRIVATE KEY-----\n(?:[A-Za-z0-9+/=]{20,}\n?)+",
+        template: SCRUBBED,
+    },
     Rule {
         pattern: r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
         template: SCRUBBED,
@@ -43,7 +54,7 @@ const RULES: &[Rule] = &[
         template: SCRUBBED,
     },
     Rule {
-        pattern: r"xox[abpr]-",
+        pattern: r"xox[abpr]-[A-Za-z0-9-]{10,}",
         template: SCRUBBED,
     },
     Rule {

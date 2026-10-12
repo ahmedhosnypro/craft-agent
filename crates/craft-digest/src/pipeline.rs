@@ -78,7 +78,7 @@ pub async fn run_digest<P: Provider + Send + Sync>(
                 .map_or_else(|_| 0, |elapsed| elapsed.as_nanos())
         ));
     let assembled = assemble(provider, deps, options, &mut bundle, &scratch, out).await;
-    cleanup_scratch(&scratch);
+    cleanup_scratch(&options.workspace_root, &scratch);
     let (digest_path, turns) = assembled?;
     Ok(DigestOutcome {
         digest_path,
@@ -141,14 +141,43 @@ fn write_digest(workspace_root: &Path, digest: &str) -> Result<PathBuf, DigestEr
 }
 
 /// Best-effort scratch removal: the run dir first, then the parents, which
-/// only go away when this run was their only content.
-fn cleanup_scratch(scratch: &Path) {
+/// only go away when this run was their only content. The walk stops at
+/// the workspace root, which the run does not own.
+fn cleanup_scratch(workspace_root: &Path, scratch: &Path) {
     let _ = fs::remove_dir_all(scratch);
     let mut parent = scratch.parent();
     while let Some(dir) = parent {
-        if fs::remove_dir(dir).is_err() {
+        if dir == workspace_root || fs::remove_dir(dir).is_err() {
             break;
         }
         parent = dir.parent();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fresh_dir(label: &str) -> PathBuf {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/tmp/craft-digest-corpus")
+            .join(format!("cleanup-{label}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn cleanup_stops_at_the_workspace_root() {
+        let workspace = fresh_dir("ws");
+        let scratch = workspace
+            .join(".craft-agent")
+            .join("digest-clones")
+            .join("1");
+        fs::create_dir_all(&scratch).unwrap();
+        cleanup_scratch(&workspace, &scratch);
+        assert!(workspace.exists(), "cleanup removed the workspace root");
+        assert!(!workspace.join(".craft-agent").exists());
+        let _ = fs::remove_dir_all(&workspace);
     }
 }

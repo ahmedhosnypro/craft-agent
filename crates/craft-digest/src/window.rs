@@ -29,7 +29,7 @@ pub fn is_valid_date(text: &str) -> bool {
     parse_date(text).is_some()
 }
 
-/// Strict `YYYY-MM-DD` (digits, in-range month and day).
+/// Strict `YYYY-MM-DD`: digits, years 0001-9999, in-range month and day.
 fn parse_date(text: &str) -> Option<(i64, i64, i64)> {
     let bytes = text.as_bytes();
     if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
@@ -38,7 +38,7 @@ fn parse_date(text: &str) -> Option<(i64, i64, i64)> {
     let year = digits(&bytes[0..4])?;
     let month = digits(&bytes[5..7])?;
     let day = digits(&bytes[8..10])?;
-    if !(1..=12).contains(&month) || day < 1 || day > days_in_month(year, month) {
+    if year < 1 || !(1..=12).contains(&month) || day < 1 || day > days_in_month(year, month) {
         return None;
     }
     Some((year, month, day))
@@ -135,58 +135,6 @@ pub fn resolve_window(today: &str, since: Option<&str>) -> Result<Window, Digest
     })
 }
 
-/// The next run's `--since`: the previous window's end, clamped and defaulted.
-pub fn derive_since(previous_body: &str, today: &str) -> Result<Window, DigestError> {
-    let end = parse_date(today)
-        .ok_or_else(|| window_err(format!("today {today:?} is not a YYYY-MM-DD date")))?;
-    let Ok(previous) = parse_marker(previous_body) else {
-        return resolve_window(today, None);
-    };
-    let Some(previous_end) = parse_date(&previous.until) else {
-        return resolve_window(today, None);
-    };
-    let floor = shift_days(end, -MAX_WINDOW_DAYS);
-    let since = if previous_end < floor {
-        floor
-    } else if previous_end > end {
-        end
-    } else {
-        previous_end
-    };
-    Ok(Window {
-        since: fmt(since),
-        until: fmt(end),
-        source: WindowSource::Marker,
-    })
-}
-
-/// Last marker in a digest body as a Window; absent or malformed is an error.
-pub fn parse_marker(body: &str) -> Result<Window, DigestError> {
-    let start = body
-        .rfind(MARKER_PREFIX)
-        .ok_or_else(|| window_err("no digest-window marker in the previous body".to_string()))?;
-    let rest = &body[start + MARKER_PREFIX.len()..];
-    let end = rest
-        .find(" -->")
-        .ok_or_else(|| window_err("marker is not closed".to_string()))?;
-    let range = &rest[..end];
-    let (start_date, end_date) = range
-        .split_once("..")
-        .ok_or_else(|| window_err("marker is not <start>..<end>".to_string()))?;
-    let since = parse_date(start_date)
-        .ok_or_else(|| window_err(format!("marker start {start_date:?} is not a date")))?;
-    let until = parse_date(end_date)
-        .ok_or_else(|| window_err(format!("marker end {end_date:?} is not a date")))?;
-    if since > until {
-        return Err(window_err("marker start is after its end".to_string()));
-    }
-    Ok(Window {
-        since: fmt(since),
-        until: fmt(until),
-        source: WindowSource::Marker,
-    })
-}
-
 /// The UTC calendar date for a Unix epoch second count; time-of-day is
 /// dropped and the day boundary is the UTC one.
 pub fn date_from_epoch_secs(secs: u64) -> String {
@@ -195,15 +143,6 @@ pub fn date_from_epoch_secs(secs: u64) -> String {
 
 fn window_epoch_err(message: &str) -> DigestError {
     window_err(format!("{message} (system clock before the Unix epoch)"))
-}
-
-/// UTC `YYYY-MM-DD` today, from the system clock.
-pub fn today_utc() -> Result<String, DigestError> {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|_| window_epoch_err("clock"))?
-        .as_secs();
-    Ok(date_from_epoch_secs(secs))
 }
 
 /// The CLI look-back duration as a window: spans under a day fall back to
