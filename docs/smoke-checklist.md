@@ -67,6 +67,14 @@ minute; `timeout-minutes: 10` bounds any hang.
 - The probe steps print nothing on success; their `test`/`grep`
   assertions are the proof.
 
+## The sim re-run
+
+With a live `.env`, re-run an adoption-class task through
+`sim/run-sim.sh` at default knobs and compare the `turn_usage` input
+curve and total spend against the frozen baselines: the calibration
+run eliminates 80.9% of verbatim re-sends and 59-70% of its spend;
+the deeper runs eliminate 23-46%.
+
 ## Follow-ups after a green dispatch
 
 - Publish the release: build the musl binaries, attach the two binaries

@@ -2,9 +2,9 @@
 
 Tools are typed streams; the loop is turn-bounded. The session record
 is both the wire transcript and the log — everything model-visible is
-logged. The one exception runs one way: result-window trimming stubs
-old tool results out of the assembled prompt while the record keeps
-them verbatim.
+logged. The exceptions run one way: result-window trimming stubs old
+tool results and per-result truncation stubs oversized tails out of
+the assembled prompt while the record keeps them verbatim.
 
 ## The Tool trait
 
@@ -123,10 +123,12 @@ token budget (default 4 000 000), the per-request output cap forwarded
 to the provider (default 8192), turn caps for the fold, an optional
 idle timeout over a stalled stream, the step-attempt bound (default 3,
 env `CRAFT_AGENT_STEP_RETRIES`), the result-window turn count (default
-20, env `CRAFT_AGENT_RESULT_WINDOW_TURNS`), the workspace root, and
-the session path. The tool layer reads `CRAFT_AGENT_READ_ROOTS` from
-the environment once at startup: extra read-only roots for the
-file-read tools. Each turn:
+20, env `CRAFT_AGENT_RESULT_WINDOW_TURNS`), the per-result truncation
+cap (default 4096 bytes, env `CRAFT_AGENT_RESULT_TRUNCATE_BYTES`,
+0 disables; over-cap results ride as head plus a spill pointer under
+RUNNER_TEMP), the workspace root, and the session path. The tool layer
+reads `CRAFT_AGENT_READ_ROOTS` from the environment once at startup:
+extra read-only roots for the file-read tools. Each turn:
 
 1. The runner builds the next request from the full session record
    plus the registry's cached tool specs, and streams it through the

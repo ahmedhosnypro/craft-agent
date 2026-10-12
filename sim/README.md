@@ -77,6 +77,7 @@ Environment overrides read by `run-sim.sh` at run time:
 | `CRAFT_AGENT_MODEL` | `glm-5.3-flash` | model id |
 | `CRAFT_AGENT_STEP_RETRIES` | `3` | attempts per model step on a dropped stream |
 | `CRAFT_AGENT_RESULT_WINDOW_TURNS` | `20` | turns of tool results kept verbatim in the prompt |
+| `CRAFT_AGENT_RESULT_TRUNCATE_BYTES` | `4096` | bytes of each tool result kept verbatim in the prompt; oversized results ride as head plus a spill pointer |
 | `CRAFT_AGENT_EGRESS_ALLOWLIST` | unset | hosts bash commands may talk to; unset or empty means ungated |
 | `CRAFT_AGENT_WRITE_REPO` | unset | `owner/name` the gh tool may write to; unset or empty means ungated |
 | `CRAFT_AGENT_READ_ROOTS` | `/runner/temp` | extra read-only roots for read_file/glob/grep, comma separated; the file tools read absolute paths inside them |

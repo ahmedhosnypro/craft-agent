@@ -19,6 +19,10 @@ the live-integration workflow are the two shipped consumers.
 | `max-tokens` | `4000000` | Total token budget cap. |
 | `prompt` | empty | Prompt text for the `run` mission; written to a file before the run. |
 | `github-token` | `github.token` | Exported as `GH_TOKEN` for the agent's gh tool. |
+| `step-retries` | `3` | Total attempts per model step when the gateway drops a stream mid-turn; `0` restores fail-fast. |
+| `result-window-turns` | `20` | Turns of tool results kept verbatim in the assembled prompt; older results ride as size stubs. `0` disables trimming. |
+| `egress-allowlist` | empty | Comma-separated hosts bash commands may talk to; empty means no egress gate. |
+| `write-repo` | empty | `owner/name` the gh tool's write verbs must target; empty means no write gate. |
 | `read-roots` | empty | Extra read-only roots for `read_file`/`glob`/`grep`, comma separated, absolute paths; empty defaults to the runner temp directory, `off` disables the feature. |
 | `version` | `v1` | Release tag the binary is downloaded from. |
 | `release-repository` | `ahmedhosnypro/craft-agent` | Repository hosting the release assets. |
