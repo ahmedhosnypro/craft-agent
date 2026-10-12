@@ -30,31 +30,39 @@ const CLOSED_DETAIL: &str =
     "run aborted: the run-event stream consumer closed before the run finished";
 /// Window the writer gets to drain its queue once the run has ended.
 const DRAIN_WINDOW: Duration = Duration::from_secs(10);
+/// Retry cadence for queueing the finish marker behind a full queue.
+const MARKER_RETRY: Duration = Duration::from_millis(50);
 
 /// The write side the agent loop holds; emit never blocks.
 pub struct EventSink {
-    tx: SyncSender<RuntimeEvent>,
+    tx: SyncSender<Option<RuntimeEvent>>,
     closed: ClosedSignal,
 }
 
 impl EventSink {
     /// A full queue drops the event; a closed queue flags the run.
     pub fn emit(&self, event: RuntimeEvent) {
-        match self.tx.try_send(event) {
-            Ok(()) => {}
-            Err(TrySendError::Full(_)) => {}
-            Err(TrySendError::Disconnected(_)) => {
-                let _ = self.closed.send(true);
-            }
+        if matches!(
+            self.tx.try_send(Some(event)),
+            Err(TrySendError::Disconnected(_))
+        ) {
+            let _ = self.closed.send(true);
         }
     }
 }
 
-/// The driver's half: the closed watch to select on and the writer's
-/// done signal for a bounded final drain.
+/// The driver's half: the closed watch to select on, the queue's finish
+/// marker, and the writer's done signal for a bounded final drain.
 pub struct EventWriterHandle {
     closed: ClosedWatch,
+    marker: SyncSender<Option<RuntimeEvent>>,
     done: oneshot::Receiver<()>,
+}
+
+fn drain_abandoned() {
+    eprintln!(
+        "craft-agent: run-event writer did not drain within {DRAIN_WINDOW:?}; leaving it behind"
+    );
 }
 
 impl EventWriterHandle {
@@ -62,13 +70,20 @@ impl EventWriterHandle {
         &self.closed
     }
 
-    /// Bounded drain: a healthy consumer reads the tail; a stalled one
-    /// is left behind and the process exits anyway.
+    /// Bounded drain: queue the finish marker, then give the writer the
+    /// rest of the window to write the tail; a stalled consumer is left
+    /// behind and the process exits anyway.
     pub async fn drain(self) {
-        if tokio::time::timeout(DRAIN_WINDOW, self.done).await.is_err() {
-            eprintln!(
-                "craft-agent: run-event writer did not drain within {DRAIN_WINDOW:?}; leaving it behind"
-            );
+        let deadline = tokio::time::Instant::now() + DRAIN_WINDOW;
+        while let Err(TrySendError::Full(_)) = self.marker.try_send(None) {
+            if tokio::time::Instant::now() >= deadline {
+                drain_abandoned();
+                return;
+            }
+            tokio::time::sleep(MARKER_RETRY).await;
+        }
+        if tokio::time::timeout_at(deadline, self.done).await.is_err() {
+            drain_abandoned();
         }
     }
 }
@@ -76,22 +91,23 @@ impl EventWriterHandle {
 struct QueueParts {
     sink: EventSink,
     handle: EventWriterHandle,
-    events: Receiver<RuntimeEvent>,
+    events: Receiver<Option<RuntimeEvent>>,
     done: oneshot::Sender<()>,
 }
 
 fn open_event_queue() -> QueueParts {
-    let (tx, events) = mpsc::sync_channel(EVENT_QUEUE_CAP);
+    let (tx, events) = mpsc::sync_channel::<Option<RuntimeEvent>>(EVENT_QUEUE_CAP);
     let (closed, closed_rx) = watch::channel(false);
     let (done_tx, done_rx) = oneshot::channel();
     QueueParts {
+        handle: EventWriterHandle {
+            closed: closed_rx,
+            marker: tx.clone(),
+            done: done_rx,
+        },
         sink: EventSink {
             tx,
             closed: closed.clone(),
-        },
-        handle: EventWriterHandle {
-            closed: closed_rx,
-            done: done_rx,
         },
         events,
         done: done_tx,
@@ -126,17 +142,17 @@ pub fn spawn_event_writer(
     Ok((sink, handle))
 }
 
-/// Drains the queue into `out` until the queue closes; the first write
-/// failure flags the consumer and stops the loop, so a dead consumer
-/// costs one stderr line, not one per event.
+/// Drains the queue into `out` until the finish marker or the queue
+/// close; the first write failure flags the consumer and stops the loop,
+/// so a dead consumer costs one stderr line, not one per event.
 fn write_events<W: Write>(
     mut out: W,
     format: OutputFormat,
-    events: Receiver<RuntimeEvent>,
+    events: Receiver<Option<RuntimeEvent>>,
     closed: ClosedSignal,
     done: oneshot::Sender<()>,
 ) {
-    while let Ok(event) = events.recv() {
+    while let Ok(Some(event)) = events.recv() {
         let result = match format {
             OutputFormat::StreamJson => write_event(&mut out, &event),
             OutputFormat::Plain => write_plain_event(&mut out, &event),
@@ -210,7 +226,7 @@ mod tests {
         let (closed, closed_rx) = watch::channel(false);
         let (done_tx, mut done_rx) = oneshot::channel();
         for turn in 1..=3 {
-            tx.send(RuntimeEvent::TurnStarted { turn })
+            tx.send(Some(RuntimeEvent::TurnStarted { turn }))
                 .expect("event queued");
         }
         drop(tx);
@@ -228,7 +244,7 @@ mod tests {
         let (closed, closed_rx) = watch::channel(false);
         let (done_tx, mut done_rx) = oneshot::channel();
         for turn in 1..=3 {
-            tx.send(RuntimeEvent::TurnStarted { turn })
+            tx.send(Some(RuntimeEvent::TurnStarted { turn }))
                 .expect("event queued");
         }
         drop(tx);
@@ -285,6 +301,17 @@ mod tests {
         assert_eq!(outcome.detail, CLOSED_DETAIL);
     }
 
+    fn ok_outcome() -> RunOutcome {
+        RunOutcome {
+            exit: ExitStatus::Ok,
+            category: CancelCategory::Completed,
+            detail: "done".to_string(),
+            usage: zero_usage(),
+            turns: 1,
+            session_path: None,
+        }
+    }
+
     #[tokio::test]
     async fn healthy_consumer_passes_the_run_outcome_through() {
         let QueueParts {
@@ -294,16 +321,35 @@ mod tests {
             done,
         } = open_event_queue();
         let _ = done.send(());
-        let run = std::future::ready(RunOutcome {
-            exit: ExitStatus::Ok,
-            category: CancelCategory::Completed,
-            detail: "done".to_string(),
-            usage: zero_usage(),
-            turns: 1,
-            session_path: None,
-        });
-        let outcome = drive(run, handle, None).await;
+        let outcome = drive(std::future::ready(ok_outcome()), handle, None).await;
         assert_eq!(outcome.exit_code(), 0);
         assert_eq!(outcome.detail, "done");
+    }
+
+    #[tokio::test]
+    async fn run_end_drain_completes_while_a_sender_still_lives() {
+        let QueueParts {
+            sink,
+            handle,
+            events,
+            done,
+        } = open_event_queue();
+        let closed = sink.closed.clone();
+        let writer = std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            write_events(&mut buf, OutputFormat::StreamJson, events, closed, done);
+            buf
+        });
+        for turn in 1..=3 {
+            sink.emit(RuntimeEvent::TurnStarted { turn });
+        }
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            drive(std::future::ready(ok_outcome()), handle, None),
+        )
+        .await
+        .expect("run-end drain must not wait out the drain window");
+        let buf = writer.join().expect("writer thread joins");
+        assert_eq!(String::from_utf8_lossy(&buf).lines().count(), 3);
     }
 }
