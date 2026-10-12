@@ -120,6 +120,37 @@ async fn oversized_event_fails_closed() {
 }
 
 #[tokio::test]
+async fn oversized_event_in_one_chunk_fails_closed() {
+    let body = format!("data: {}\n\n", "a".repeat(200));
+    let mut reader = SseReader::new(
+        bytes_stream(vec![body.as_bytes()]),
+        opts(64, Duration::from_secs(30)),
+    );
+    let next = reader.next().await;
+    assert!(
+        matches!(next, Some(Err(SseError::EventTooLarge { cap: 64 }))),
+        "an event whose data exceeds the cap must be capped, got {next:?}"
+    );
+}
+
+#[tokio::test]
+async fn coalesced_events_in_one_chunk_pass_the_cap() {
+    let body = "data: a\n\n".repeat(12);
+    let mut reader = SseReader::new(
+        bytes_stream(vec![body.as_bytes()]),
+        opts(64, Duration::from_secs(30)),
+    );
+    for _ in 0..12 {
+        assert_eq!(
+            reader.next().await,
+            Some(Ok(event("message", "a"))),
+            "small events coalesced past the cap must still parse"
+        );
+    }
+    assert_eq!(reader.next().await, None);
+}
+
+#[tokio::test]
 async fn stalled_stream_surfaces_idle_timeout() {
     let head = bytes_stream(vec![b"data: partial-no-terminator\n"]);
     let stalled = head.chain(futures::stream::pending());
@@ -143,27 +174,6 @@ async fn transport_errors_pass_through() {
         ),
         "underlying errors must pass through, got {next:?}"
     );
-}
-
-#[tokio::test]
-async fn sse_errors_map_into_the_provider_taxonomy() {
-    let idle: ProviderError = SseError::<ProviderError>::Idle {
-        after: Duration::from_secs(300),
-    }
-    .into();
-    assert_eq!(idle, ProviderError::IdleTimeout);
-
-    let malformed: ProviderError = SseError::Malformed {
-        detail: String::from("invalid UTF-8"),
-    }
-    .into();
-    assert!(matches!(malformed, ProviderError::Transport { .. }));
-
-    let oversized: ProviderError = SseError::EventTooLarge { cap: 64 }.into();
-    assert!(matches!(oversized, ProviderError::Transport { .. }));
-
-    let passthrough: ProviderError = SseError::Transport(transport("reset")).into();
-    assert!(matches!(passthrough, ProviderError::Transport { .. }));
 }
 
 #[test]

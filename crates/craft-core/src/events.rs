@@ -146,6 +146,10 @@ impl TurnFold {
     /// terminal and it never becomes a second one. A different stop
     /// reason is a corrupt stream.
     fn absorb_repeat(&mut self, stop_reason: StopReason, usage: Usage) -> Result<(), FoldError> {
+        let stop_reason = match stop_reason {
+            StopReason::Other(raw) => StopReason::Other(cap_stop_reason(raw)),
+            known => known,
+        };
         let recorded = match self.finished.as_mut() {
             Some(recorded) => recorded,
             None => return self.push_finished(stop_reason, usage),

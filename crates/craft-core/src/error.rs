@@ -19,6 +19,8 @@ pub enum ProviderError {
     Auth { detail: String },
     #[error("rate limited; retry after: {retry_after:?}")]
     RateLimit { retry_after: Option<Duration> },
+    #[error("provider quota exhausted: {detail}")]
+    QuotaExhausted { detail: String },
     #[error("transient provider error: {detail}")]
     Transient { detail: String },
     #[error("request payload too large: {detail}")]

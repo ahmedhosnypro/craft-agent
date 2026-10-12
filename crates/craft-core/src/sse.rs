@@ -3,7 +3,7 @@
 
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -11,8 +11,6 @@ use bytes::Bytes;
 pub use eventsource_stream::Event as SseEvent;
 use eventsource_stream::{EventStream, EventStreamError, Eventsource};
 use futures::Stream;
-
-use crate::error::ProviderError;
 
 /// Idle-window default behind `CRAFT_AGENT_IDLE_TIMEOUT_SECS`; the same
 /// seconds flow into the reader's per-chunk timeout.
@@ -47,29 +45,41 @@ pub enum SseError<E> {
     #[error("no SSE event within {after:?}")]
     Idle { after: Duration },
 }
-const BOM: [u8; 3] = [0xEF, 0xBB, 0xBF];
-
 /// Bytes consumed since the last yielded event, shared between the
-/// byte wrapper (charges) and the reader (resets).
+/// byte wrapper (charges) and the reader (resets). Crossing the cap
+/// only fails the stream once the parser cannot extract another event
+/// from the bytes it was handed.
 struct ByteBudget {
     fed: AtomicU64,
+    over_cap: AtomicBool,
     cap: u64,
 }
 
 impl ByteBudget {
-    fn charge(&self, len: usize) -> bool {
+    fn charge(&self, len: usize) {
         let len = u64::try_from(len).unwrap_or(u64::MAX);
         self.fed.fetch_add(len, Ordering::Relaxed);
-        self.fed.load(Ordering::Relaxed) <= self.cap
+        if self.fed.load(Ordering::Relaxed) > self.cap {
+            self.over_cap.store(true, Ordering::Relaxed);
+        }
+    }
+
+    fn over_cap(&self) -> bool {
+        self.over_cap.load(Ordering::Relaxed)
     }
 
     fn reset(&self) {
         self.fed.store(0, Ordering::Relaxed);
+        self.over_cap.store(false, Ordering::Relaxed);
     }
 }
 
+const BOM: [u8; 3] = [0xEF, 0xBB, 0xBF];
+
 /// BOM strip state: a chunk shorter than the BOM itself is held back
-/// until the next chunk resolves the prefix.
+/// until the next chunk resolves the prefix. The strip lives here
+/// because the parser's own BOM handling slices the U+FEFF char at a
+/// non-char boundary and panics.
 enum BomState {
     Pending(Vec<u8>),
     Done,
@@ -128,15 +138,16 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         loop {
+            if this.budget.over_cap() {
+                return Poll::Ready(Some(Err(SseError::EventTooLarge {
+                    cap: this.budget.cap,
+                })));
+            }
             match this.inner.as_mut().poll_next(cx) {
                 Poll::Ready(Some(Ok(bytes))) => match this.take_bom(bytes) {
                     Some(chunk) => {
-                        if this.budget.charge(chunk.len()) {
-                            return Poll::Ready(Some(Ok(chunk)));
-                        }
-                        return Poll::Ready(Some(Err(SseError::EventTooLarge {
-                            cap: this.budget.cap,
-                        })));
+                        this.budget.charge(chunk.len());
+                        return Poll::Ready(Some(Ok(chunk)));
                     }
                     None => continue,
                 },
@@ -145,12 +156,8 @@ where
                 }
                 Poll::Ready(None) => match this.flush_pending() {
                     Some(chunk) => {
-                        if this.budget.charge(chunk.len()) {
-                            return Poll::Ready(Some(Ok(chunk)));
-                        }
-                        return Poll::Ready(Some(Err(SseError::EventTooLarge {
-                            cap: this.budget.cap,
-                        })));
+                        this.budget.charge(chunk.len());
+                        return Poll::Ready(Some(Ok(chunk)));
                     }
                     None => return Poll::Ready(None),
                 },
@@ -177,6 +184,7 @@ where
     pub fn new(byte_stream: S, options: SseOptions) -> Self {
         let budget = Arc::new(ByteBudget {
             fed: AtomicU64::new(0),
+            over_cap: AtomicBool::new(false),
             cap: options.max_event_bytes,
         });
         let inner = Budgeted {
@@ -222,6 +230,13 @@ where
                         detail: String::from("event carries no data"),
                     })));
                 }
+                if u64::try_from(event.data.len()).unwrap_or(u64::MAX)
+                    > this.options.max_event_bytes
+                {
+                    return Poll::Ready(Some(Err(SseError::EventTooLarge {
+                        cap: this.options.max_event_bytes,
+                    })));
+                }
                 Poll::Ready(Some(Ok(event)))
             }
             Poll::Ready(Some(Err(err))) => {
@@ -240,19 +255,6 @@ where
                     Poll::Pending => Poll::Pending,
                 }
             }
-        }
-    }
-}
-
-impl From<SseError<ProviderError>> for ProviderError {
-    fn from(err: SseError<ProviderError>) -> Self {
-        match err {
-            SseError::Transport(e) => e,
-            SseError::Malformed { detail } => Self::Transport { detail },
-            SseError::EventTooLarge { cap } => Self::Transport {
-                detail: format!("SSE event exceeded {cap} bytes"),
-            },
-            SseError::Idle { .. } => Self::IdleTimeout,
         }
     }
 }

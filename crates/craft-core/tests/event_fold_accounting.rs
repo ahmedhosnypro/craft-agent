@@ -59,6 +59,22 @@ fn repeated_terminal_with_unknown_reason_string_absorbs_same_text() -> Result<()
 }
 
 #[test]
+fn repeated_terminal_with_long_unknown_reason_still_absorbs() -> Result<(), FoldError> {
+    let mut fold = TurnFold::new(TurnCaps::default());
+    let long = StopReason::Other("e".repeat(100));
+    fold.push(finished(long.clone(), 1, 0))?;
+    fold.push(finished(long, 1, 2))?;
+    let turn = fold.finish()?;
+    assert_eq!(
+        turn.stop_reason,
+        StopReason::Other("e".repeat(64)),
+        "the capped recorded reason must match its identical uncapped repeat"
+    );
+    assert_eq!(turn.usage.output_tokens, 2);
+    Ok(())
+}
+
+#[test]
 fn repeated_terminal_with_different_reason_fails_closed() {
     let mut fold = TurnFold::new(TurnCaps::default());
     let first = fold.push(finished(StopReason::EndTurn, 1, 1));
