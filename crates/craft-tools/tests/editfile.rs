@@ -203,3 +203,68 @@ async fn rereading_after_external_change_reenables_edit() {
         "crisp content\n"
     );
 }
+
+#[tokio::test]
+async fn edit_result_over_the_write_cap_is_rejected_untouched() {
+    let ws = tmp_ws("edit-blowup");
+    let ctx = ctx_for(&ws);
+    write(&ws, "f.txt", "aaa\n");
+    let _ = run(reg().execute("read_file", json!({ "path": "f.txt" }), &ctx)).await;
+    let events = edit(
+        &ctx,
+        json!({
+            "path": "f.txt",
+            "old_string": "a",
+            "new_string": "z".repeat(2000),
+            "replace_all": true
+        }),
+    )
+    .await;
+    match error(&events) {
+        ToolError::FileTooLarge { size, limit, .. } => {
+            assert_eq!(size, 4 - 3 + 3 * 2000);
+            assert_eq!(limit, 1024);
+        }
+        other => panic!("expected FileTooLarge, got {other:?}"),
+    }
+    assert_eq!(
+        fs::read_to_string(ws.join("f.txt")).expect("unchanged"),
+        "aaa\n"
+    );
+}
+
+#[tokio::test]
+async fn replace_all_skips_overlapping_occurrences() {
+    let ws = tmp_ws("edit-overlap");
+    let ctx = ctx_for(&ws);
+    write(&ws, "f.txt", "aaaa\n");
+    let _ = run(reg().execute("read_file", json!({ "path": "f.txt" }), &ctx)).await;
+    let events = edit(
+        &ctx,
+        json!({ "path": "f.txt", "old_string": "aa", "new_string": "y", "replace_all": true }),
+    )
+    .await;
+    assert_clean(&events);
+    assert_eq!(
+        fs::read_to_string(ws.join("f.txt")).expect("edited"),
+        "yy\n"
+    );
+}
+
+#[tokio::test]
+async fn replace_all_finds_matches_after_a_partial_prefix() {
+    let ws = tmp_ws("edit-prefix");
+    let ctx = ctx_for(&ws);
+    write(&ws, "f.txt", "aabaaab\n");
+    let _ = run(reg().execute("read_file", json!({ "path": "f.txt" }), &ctx)).await;
+    let events = edit(
+        &ctx,
+        json!({ "path": "f.txt", "old_string": "aab", "new_string": "X", "replace_all": true }),
+    )
+    .await;
+    assert_clean(&events);
+    assert_eq!(
+        fs::read_to_string(ws.join("f.txt")).expect("edited"),
+        "XaX\n"
+    );
+}

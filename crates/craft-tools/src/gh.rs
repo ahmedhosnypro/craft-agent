@@ -39,7 +39,9 @@ impl GhTool {
             self.limits.max_path_bytes,
             self.limits.max_args,
         )?;
-        let wants_json = argv.iter().any(|a| a == "--json");
+        let wants_json = argv
+            .iter()
+            .any(|a| a == "--json" || a.starts_with("--json="));
         let spec = ProcSpec {
             program: "gh".to_string(),
             argv,

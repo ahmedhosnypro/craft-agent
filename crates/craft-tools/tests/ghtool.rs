@@ -68,6 +68,18 @@ async fn json_flag_output_must_parse() {
 }
 
 #[tokio::test]
+async fn json_flag_equals_form_is_validated_too() {
+    let (_ws, reg, ctx) = ws_with_gh("gh-json-eq", "jsonbad");
+    let events = run(reg.execute(
+        "gh",
+        json!({ "args": ["pr", "list", "--json=number"] }),
+        &ctx,
+    ))
+    .await;
+    assert!(matches!(error(&events), ToolError::GhBadJson { .. }));
+}
+
+#[tokio::test]
 async fn failure_output_maps_to_a_typed_error_with_code_and_stderr() {
     let (_ws, reg, ctx) = ws_with_gh("gh-fail", "fail");
     let events = run(reg.execute("gh", json!({ "args": ["pr", "view", "999"] }), &ctx)).await;

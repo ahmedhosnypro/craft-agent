@@ -43,6 +43,33 @@ async fn double_star_recurses() {
 }
 
 #[tokio::test]
+async fn results_across_sibling_dirs_are_sorted() {
+    let ws = tmp_ws("glob-sibling-order");
+    write(&ws, "a-dir/x.txt", "1");
+    write(&ws, "b-dir/y.txt", "1");
+    let events = run(reg().execute("glob", json!({ "pattern": "**/*.txt" }), &ctx_for(&ws))).await;
+    assert_clean(&events);
+    assert_eq!(
+        lines(&terminal(&events)),
+        vec!["a-dir/x.txt", "b-dir/y.txt"]
+    );
+}
+
+#[tokio::test]
+async fn file_target_matches_by_name() {
+    let ws = tmp_ws("glob-file-target");
+    write(&ws, "sub/x.txt", "1");
+    let events = run(reg().execute(
+        "glob",
+        json!({ "pattern": "*.txt", "path": "sub/x.txt" }),
+        &ctx_for(&ws),
+    ))
+    .await;
+    assert_clean(&events);
+    assert_eq!(terminal(&events), "sub/x.txt\n");
+}
+
+#[tokio::test]
 async fn results_are_bounded_with_a_note() {
     let ws = tmp_ws("glob-capped");
     for i in 0..8 {

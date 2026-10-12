@@ -108,7 +108,8 @@ impl EditFileTool {
                 count: positions.len(),
             });
         }
-        let edited = splice(&bytes, old.as_bytes(), new.as_bytes(), &positions);
+        let edited =
+            self.checked_splice(&abs, &bytes, old.as_bytes(), new.as_bytes(), &positions)?;
         std::fs::write(&abs, &edited).map_err(|e| ToolError::Io {
             op: "write",
             msg: e.to_string(),
@@ -117,6 +118,31 @@ impl EditFileTool {
         let note = format!("replaced {} occurrence(s) in {input}", positions.len());
         Ok(event::result_stream(note))
     }
+
+    /// Splice the replacements in, rejecting a result that would exceed
+    /// the write cap before anything is allocated or written.
+    fn checked_splice(
+        &self,
+        abs: &std::path::Path,
+        file_view: &[u8],
+        old_view: &[u8],
+        new_view: &[u8],
+        positions: &[usize],
+    ) -> Result<Vec<u8>, ToolError> {
+        let count = positions.len();
+        let out_len = file_view
+            .len()
+            .saturating_sub(count.saturating_mul(old_view.len()))
+            .saturating_add(count.saturating_mul(new_view.len()));
+        if out_len > self.limits.write_cap {
+            return Err(ToolError::FileTooLarge {
+                path: display(abs),
+                size: out_len as u64,
+                limit: self.limits.write_cap,
+            });
+        }
+        Ok(splice(file_view, old_view, new_view, positions))
+    }
 }
 
 fn display(path: &std::path::Path) -> String {
@@ -124,21 +150,45 @@ fn display(path: &std::path::Path) -> String {
 }
 
 /// Non-overlapping match positions of `needle` in `hay`, ascending.
+/// Knuth-Morris-Pratt, so long partial matches cannot make the scan
+/// quadratic in hostile input.
 fn find_all(hay: &[u8], needle: &[u8]) -> Vec<usize> {
     if needle.is_empty() || hay.len() < needle.len() {
         return Vec::new();
     }
-    let mut out = Vec::new();
-    let mut cursor = 0usize;
-    while let Some(rel) = hay[cursor..]
-        .windows(needle.len())
-        .position(|w| w == needle)
-    {
-        out.push(cursor + rel);
-        cursor = cursor + rel + needle.len();
-        if hay.len() < cursor + needle.len() {
-            break;
+    let mut fail = vec![0usize; needle.len()];
+    let mut matched = 0usize;
+    for i in 1..needle.len() {
+        while matched > 0 && needle.get(i) != needle.get(matched) {
+            matched = fail.get(matched - 1).copied().unwrap_or(0);
         }
+        if needle.get(i) == needle.get(matched) {
+            matched += 1;
+        }
+        if let Some(slot) = fail.get_mut(i) {
+            *slot = matched;
+        }
+    }
+    let mut out = Vec::new();
+    let mut matched = 0usize;
+    let mut cursor = 0usize;
+    while let Some(byte) = hay.get(cursor) {
+        if matched == needle.len() {
+            out.push(cursor - needle.len());
+            matched = 0;
+            continue;
+        }
+        if Some(byte) == needle.get(matched) {
+            matched += 1;
+            cursor += 1;
+        } else if matched > 0 {
+            matched = fail.get(matched - 1).copied().unwrap_or(0);
+        } else {
+            cursor += 1;
+        }
+    }
+    if matched == needle.len() {
+        out.push(hay.len() - needle.len());
     }
     out
 }

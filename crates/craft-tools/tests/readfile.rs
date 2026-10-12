@@ -7,7 +7,6 @@ use common::{
 };
 use craft_tools::{Registry, ToolError};
 use serde_json::json;
-use std::fs;
 
 fn reg() -> Registry {
     Registry::with_builtins(fast_limits())
@@ -92,5 +91,4 @@ async fn hostile_args_are_typed_errors() {
             "{shown}"
         );
     }
-    let _ = fs::read_dir(&ws).map(|_| ());
 }

@@ -73,7 +73,8 @@ impl GlobTool {
         let outcome;
         if scope_meta.is_file() {
             outcome = crate::walk::WalkOutcome::default();
-            if let Some(rel) = rel_to(&scope, &scope)
+            let base = scope.parent().unwrap_or(&scope);
+            if let Some(rel) = rel_to(&scope, base)
                 && matcher.is_match(&rel)
             {
                 hits.push(display_rel(&scope, &root));
@@ -94,6 +95,7 @@ impl GlobTool {
                 },
             )?;
         }
+        hits.sort_unstable();
         let mut out = hits.join("\n");
         if !out.is_empty() {
             out.push('\n');

@@ -222,3 +222,69 @@ async fn glob_filter_narrows_the_search() {
     assert_clean(&events);
     assert_eq!(matches(&terminal(&events)), vec!["keep.rs:1: needle"]);
 }
+
+#[tokio::test]
+async fn glob_filter_matches_a_single_file_target_by_name() {
+    let ws = tmp_ws("grep-file-glob");
+    write(&ws, "one.rs", "needle\n");
+    let events = run(reg().execute(
+        "grep",
+        json!({ "pattern": "needle", "path": "one.rs", "literal": true, "glob": "*.rs" }),
+        &ctx_for(&ws),
+    ))
+    .await;
+    assert_clean(&events);
+    assert_eq!(matches(&terminal(&events)), vec!["one.rs:1: needle"]);
+}
+
+#[tokio::test]
+async fn rows_are_sorted_by_path_then_line_number() {
+    let ws = tmp_ws("grep-row-order");
+    let mut body = String::new();
+    for i in 1..=12 {
+        body.push_str(&format!("needle {i}\n"));
+    }
+    write(&ws, "b/m.txt", &body);
+    write(&ws, "a/m.txt", "needle here\n");
+    let mut limits = fast_limits();
+    limits.grep_max_results = 20;
+    let events = run(Registry::with_builtins(limits).execute(
+        "grep",
+        json!({ "pattern": "needle", "literal": true }),
+        &ctx_for(&ws),
+    ))
+    .await;
+    assert_clean(&events);
+    let mut expected = vec!["a/m.txt:1: needle here".to_string()];
+    for i in 1..=12 {
+        expected.push(format!("b/m.txt:{i}: needle {i}"));
+    }
+    let got: Vec<String> = matches(&terminal(&events))
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(got, expected);
+}
+
+#[tokio::test]
+async fn unreadable_file_is_reported_as_unreadable_not_binary() {
+    use std::os::unix::fs::PermissionsExt;
+    let ws = tmp_ws("grep-unreadable");
+    write(&ws, "locked.txt", "needle\n");
+    write(&ws, "open.txt", "needle\n");
+    let locked = ws.join("locked.txt");
+    let mut perms = fs::metadata(&locked).expect("fixture meta").permissions();
+    perms.set_mode(0o000);
+    fs::set_permissions(&locked, perms).expect("fixture chmod");
+    let events = run(reg().execute(
+        "grep",
+        json!({ "pattern": "needle", "literal": true }),
+        &ctx_for(&ws),
+    ))
+    .await;
+    assert_clean(&events);
+    let out = terminal(&events);
+    assert_eq!(matches(&out), vec!["open.txt:1: needle"], "{out}");
+    assert!(out.contains("[skipped 1 unreadable file"), "{out}");
+    assert!(!out.contains("binary"), "{out}");
+}

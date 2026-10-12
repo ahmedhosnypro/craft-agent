@@ -27,16 +27,36 @@ pub enum ToolError {
     NotReadFirst { path: String },
     #[error("file changed on disk since it was last read: {path}")]
     ChangedOnDisk { path: String },
-    #[error("old_string not found in {path}")]
+    #[error(
+        "old_string not found in {path}; the file contents may be out of date, use the read_file tool to read the file again and reload the content"
+    )]
     EditNoMatch { path: String },
-    #[error("old_string matches {count} locations in {path}; add context or pass replace_all")]
+    #[error(
+        "old_string matches {count} locations in {path}; to replace every occurrence pass replace_all=true, to replace one occurrence include more surrounding context in old_string"
+    )]
     EditAmbiguous { path: String, count: usize },
+    #[error(
+        "cannot edit {path}: mixed or lone-CR line endings; rewrite the file with write_file using consistent LF or CRLF endings, then edit"
+    )]
+    EditMixedEndings { path: String },
     #[error("command exceeded its {timeout_ms}ms timeout and was terminated")]
     TimedOut { timeout_ms: u64 },
     #[error("command exited {code:?}: {stderr}")]
     NonZeroExit { code: Option<i32>, stderr: String },
     #[error("gh exited {code:?}: {stderr}")]
     GhFailed { code: Option<i32>, stderr: String },
+    #[error("gh write denied: `{target}` is not the repository declared by CRAFT_AGENT_WRITE_REPO")]
+    GhWriteDenied { target: String },
+    #[error(
+        "gh write denied: no usable -R/--repo target; name the repository declared by CRAFT_AGENT_WRITE_REPO"
+    )]
+    GhWriteUntargeted,
+    #[error(
+        "gh auth setup-git denied: the git credential helper is host-wide, so plain git push would bypass CRAFT_AGENT_WRITE_REPO; configure git credentials in the caller instead"
+    )]
+    GhSetupGitDenied,
+    #[error("gh write denied: CRAFT_AGENT_WRITE_REPO must be `owner/name`")]
+    GhWriteRepoMalformed,
     #[error("gh --json output is not valid JSON: {snippet}")]
     GhBadJson { snippet: String },
     #[error("could not spawn `{program}`: {msg}")]

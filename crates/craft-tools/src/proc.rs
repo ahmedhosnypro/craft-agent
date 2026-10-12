@@ -1,13 +1,19 @@
 //! The child-process engine behind bash and gh: piped capture bounded by
 //! an output cap, a per-run timeout, and the kill sequence SIGTERM →
-//! grace window → SIGKILL. Chunks stream as progress while the child
-//! runs; the exit event carries the bounded accumulated output.
+//! grace window → SIGKILL. The child owns a fresh process group so the
+//! kill sequence takes its background jobs with it. The loop polls for
+//! child exit, so a script that leaves a pipe-holding grandchild still
+//! finishes at the child's own exit rather than the timeout. Chunks
+//! stream as progress while the child runs; the exit event carries the
+//! bounded accumulated output.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use futures::channel::mpsc;
 use futures::stream::Stream;
+use nix::sys::signal::{Signal, kill, killpg};
+use nix::unistd::Pid;
 use tokio::io::AsyncReadExt;
 use tokio::process::{Child, ChildStderr, ChildStdout, Command};
 
@@ -35,7 +41,6 @@ pub enum StreamTag {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcExit {
     pub code: Option<i32>,
-    pub signal: Option<i32>,
     pub timed_out: bool,
     pub stdout: String,
     pub stderr: String,
@@ -51,6 +56,11 @@ pub enum ProcEvent {
 
 const READ_BUF: usize = 8 * 1024;
 const FINAL_GRACE_MULT: u32 = 2;
+/// How often the loop polls the child for exit while pipes stay open.
+const EXIT_POLL: Duration = Duration::from_millis(100);
+/// How long pipes are drained once the child has exited before giving up
+/// on grandchildren that still hold them.
+const PIPE_DRAIN: Duration = Duration::from_millis(200);
 
 /// Spawn the child and return its event stream. The pump task drives the
 /// child to completion; dropping the stream kills it.
@@ -60,6 +70,7 @@ pub fn spawn(
     let mut cmd = Command::new(&spec.program);
     cmd.args(&spec.argv)
         .current_dir(&spec.cwd)
+        .process_group(0)
         .env_clear()
         .envs(spec.env.iter().map(|(k, v)| (k, v)))
         .stdin(std::process::Stdio::null())
@@ -97,12 +108,14 @@ struct Pump {
     deadline: Instant,
     grace_at: Option<Instant>,
     final_at: Option<Instant>,
+    drain_until: Option<Instant>,
+    pgid: Option<i32>,
     aborted: bool,
     done: bool,
 }
 
 impl Pump {
-    fn new(spec: &ProcSpec) -> Self {
+    fn new(spec: &ProcSpec, pgid: Option<i32>) -> Self {
         Self {
             out_acc: Vec::new(),
             err_acc: Vec::new(),
@@ -113,6 +126,8 @@ impl Pump {
             deadline: Instant::now() + spec.timeout,
             grace_at: None,
             final_at: None,
+            drain_until: None,
+            pgid,
             aborted: false,
             done: false,
         }
@@ -126,7 +141,8 @@ async fn pump(
     tx: mpsc::UnboundedSender<Result<ProcEvent, ToolError>>,
     spec: ProcSpec,
 ) {
-    let mut state = Pump::new(&spec);
+    let pgid = child.id().and_then(|id| i32::try_from(id).ok());
+    let mut state = Pump::new(&spec, pgid);
     let mut out_buf = [0u8; READ_BUF];
     let mut err_buf = [0u8; READ_BUF];
     while !state.done {
@@ -142,8 +158,8 @@ async fn pump(
     let _ = tx.unbounded_send(Ok(ProcEvent::Exit(exit)));
 }
 
-/// One select round: advance the kill-state machine, then drain whichever
-/// pipe has data.
+/// One select round: poll the child, advance the kill-state machine,
+/// then drain whichever pipe has data.
 struct Pipes<'a> {
     out: &'a mut ChildStdout,
     err: &'a mut ChildStderr,
@@ -163,28 +179,37 @@ async fn tick(
         return;
     }
     let now = Instant::now();
-    if state.grace_at.is_none() && now >= state.deadline {
-        send_sigterm(child);
-        state.grace_at = Some(now + spec.term_grace);
+    if state.drain_until.is_none() {
+        // The kill ladder runs only while the child is alive; once it has
+        // exited, the pipes get a short drain before giving up on
+        // grandchildren that still hold them.
+        if child.try_wait().ok().flatten().is_some() {
+            state.drain_until = Some(now + PIPE_DRAIN);
+        } else if advance_kill(state, child, now, spec) {
+            return;
+        }
     }
-    if let Some(grace) = state.grace_at
-        && now >= grace
-        && state.final_at.is_none()
+    if let Some(until) = state.drain_until
+        && now >= until
     {
-        kill_child(child);
-        state.final_at = Some(now + spec.term_grace * FINAL_GRACE_MULT);
-    }
-    if let Some(final_at) = state.final_at
-        && now >= final_at
-    {
+        // Leftovers of a timed-out script die with it; a script that
+        // finished on its own keeps its background jobs.
+        if state.grace_at.is_some() {
+            kill_group(state, child);
+        }
         state.done = true;
         return;
     }
-    let wake = state
-        .grace_at
-        .or(state.final_at)
-        .unwrap_or(state.deadline)
-        .min(state.deadline);
+    let phase = match (state.grace_at, state.final_at) {
+        (Some(_), Some(final_at)) => final_at,
+        (Some(grace), None) => grace,
+        (None, _) => state.deadline,
+    };
+    let mut wake = phase;
+    if let Some(drain) = state.drain_until {
+        wake = wake.min(drain);
+    }
+    let wake = wake.min(now + EXIT_POLL);
     let out_pending = !state.out_done;
     let err_pending = !state.err_done;
     tokio::select! {
@@ -200,6 +225,29 @@ async fn tick(
     }
 }
 
+/// The kill ladder SIGTERM → grace → SIGKILL → final wait; runs only
+/// while the child is alive. Returns true when the final wait expires.
+fn advance_kill(state: &mut Pump, child: &mut Child, now: Instant, spec: &ProcSpec) -> bool {
+    if state.grace_at.is_none() && now >= state.deadline {
+        send_sigterm(state, child);
+        state.grace_at = Some(now + spec.term_grace);
+    }
+    if let Some(grace) = state.grace_at
+        && now >= grace
+        && state.final_at.is_none()
+    {
+        kill_group(state, child);
+        state.final_at = Some(now + spec.term_grace * FINAL_GRACE_MULT);
+    }
+    if let Some(final_at) = state.final_at
+        && now >= final_at
+    {
+        state.done = true;
+        return true;
+    }
+    false
+}
+
 /// Record one pipe read: EOF closes the pipe, data fills the bounded
 /// accumulator and streams as a chunk until the cap is hit, a dead
 /// receiver aborts and kills the child.
@@ -213,15 +261,11 @@ fn absorb(
     child: &mut Child,
 ) {
     let n = match read {
-        Ok(0) => {
+        Ok(0) | Err(_) => {
             mark_done(state, tag);
             return;
         }
         Ok(n) => n,
-        Err(_) => {
-            mark_done(state, tag);
-            return;
-        }
     };
     let (out_acc, trunc_flag) = split_acc(state, tag);
     let take = cap.saturating_sub(out_acc.len()).min(n);
@@ -237,7 +281,7 @@ fn absorb(
         if sent.is_err() {
             state.aborted = true;
             state.done = true;
-            kill_child(child);
+            kill_group(state, child);
         }
     } else if n > take {
         *trunc_flag = true;
@@ -262,27 +306,20 @@ fn split_acc(state: &mut Pump, tag: StreamTag) -> (&mut Vec<u8>, &mut bool) {
 /// window, then SIGKILL plus a final wait. Always consumes the child.
 async fn reap(state: &mut Pump, child: &mut Child, spec: &ProcSpec) -> ProcExit {
     if state.aborted {
-        kill_child(child);
+        kill_group(state, child);
     }
     let status = match tokio::time::timeout(spec.term_grace, child.wait()).await {
         Ok(Ok(status)) => Some(status),
         _ => {
-            kill_child(child);
+            kill_group(state, child);
             child.wait().await.ok()
         }
     };
-    let (code, signal) = match &status {
-        Some(status) => (
-            status.code(),
-            std::os::unix::process::ExitStatusExt::signal(status),
-        ),
-        None => (None, None),
-    };
+    let code = status.as_ref().and_then(|s| s.code());
     let (stdout, stdout_truncated) = util::bounded_lossy(&state.out_acc, spec.out_cap);
     let (stderr, stderr_truncated) = util::bounded_lossy(&state.err_acc, spec.out_cap);
     ProcExit {
         code,
-        signal,
         timed_out: state.grace_at.is_some(),
         stdout,
         stderr,
@@ -291,19 +328,26 @@ async fn reap(state: &mut Pump, child: &mut Child, spec: &ProcSpec) -> ProcExit 
     }
 }
 
-/// Deliver SIGTERM; a vanished child (ESRCH) is not an error.
-fn send_sigterm(child: &mut Child) {
+/// SIGTERM the whole process group; a vanished group (ESRCH) is not an
+/// error.
+fn send_sigterm(state: &Pump, child: &mut Child) {
+    signal_group(state, Signal::SIGTERM);
     if let Some(id) = child.id()
         && let Ok(pid) = i32::try_from(id)
     {
-        let _ = nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(pid),
-            nix::sys::signal::Signal::SIGTERM,
-        );
+        let _ = kill(Pid::from_raw(pid), Signal::SIGTERM);
     }
 }
 
-/// SIGKILL, for when the grace window is spent or the stream is gone.
-fn kill_child(child: &mut Child) {
+/// SIGKILL the whole group plus the child itself, for a spent grace
+/// window, a dead receiver, or a timed-out script's leftover jobs.
+fn kill_group(state: &Pump, child: &mut Child) {
+    signal_group(state, Signal::SIGKILL);
     let _ = child.start_kill();
+}
+
+fn signal_group(state: &Pump, sig: Signal) {
+    if let Some(pgid) = state.pgid {
+        let _ = killpg(Pid::from_raw(pgid), sig);
+    }
 }

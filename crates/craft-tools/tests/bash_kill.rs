@@ -87,6 +87,22 @@ async fn a_child_exiting_on_sigterm_within_grace_reports_the_timeout() {
 }
 
 #[tokio::test]
+async fn timeout_sends_sigterm_to_the_whole_process_group() {
+    let ws = tmp_ws("kill-group");
+    let (reg, _timeout, _grace) = kill_limits();
+    let m = marker(&ws);
+    let command =
+        format!("trap 'echo termed > \"{m}\"' TERM; while :; do :; done & while :; do :; done");
+    let events = run(reg.execute("bash", json!({ "command": command }), &ctx_for(&ws))).await;
+
+    assert!(matches!(error(&events), ToolError::TimedOut { .. }));
+    assert!(
+        fs::read_to_string(ws.join("term-marker.txt")).is_ok_and(|c| c.contains("termed")),
+        "the background job must receive the SIGTERM"
+    );
+}
+
+#[tokio::test]
 async fn a_fast_command_is_never_signaled() {
     let ws = tmp_ws("kill-clean");
     let (reg, _t, _g) = kill_limits();

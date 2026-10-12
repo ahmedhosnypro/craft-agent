@@ -17,11 +17,12 @@ pub struct WalkOutcome {
     pub visited_files: usize,
     pub skipped_sensitive: usize,
     pub skipped_unreadable: usize,
+    pub skipped_symlinks: usize,
 }
 
 /// Walk `root` depth-first, visiting files in sorted name order. The
 /// visitor returns false to stop early (result caps). Sensitive files
-/// are skipped and counted, never visited.
+/// and symlinks are skipped and counted, never visited.
 pub fn walk_files(
     root: &Path,
     max_entries: usize,
@@ -38,7 +39,7 @@ pub fn walk_files(
                 continue;
             }
         };
-        let mut listed: Vec<(PathBuf, bool)> = Vec::new();
+        let mut listed: Vec<(PathBuf, Option<std::fs::FileType>)> = Vec::new();
         for entry in entries {
             let Ok(entry) = entry else {
                 outcome.skipped_unreadable = outcome.skipped_unreadable.saturating_add(1);
@@ -48,12 +49,15 @@ pub fn walk_files(
             if outcome.entries_seen > max_entries {
                 return Ok(outcome);
             }
-            let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
-            listed.push((entry.path(), is_dir));
+            listed.push((entry.path(), entry.file_type().ok()));
         }
         listed.sort_by(|a, b| a.0.file_name().cmp(&b.0.file_name()));
-        for (path, is_dir) in listed {
-            if is_dir {
+        for (path, file_type) in listed {
+            if file_type.is_some_and(|t| t.is_symlink()) {
+                outcome.skipped_symlinks = outcome.skipped_symlinks.saturating_add(1);
+                continue;
+            }
+            if file_type.is_some_and(|t| t.is_dir()) {
                 let descend = depth < max_depth
                     && !is_skipped_dir(&path)
                     && sensitive_reason(&path).is_none();

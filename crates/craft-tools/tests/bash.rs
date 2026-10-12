@@ -223,3 +223,22 @@ async fn missing_bash_binary_is_a_typed_spawn_error() {
         run(reg(fast_limits()).execute("bash", json!({ "command": "echo x" }), &ctx)).await;
     assert!(matches!(error(&events), ToolError::Spawn { .. }));
 }
+
+#[tokio::test]
+async fn a_backgrounded_child_holding_stdout_does_not_mask_success() {
+    let ws = tmp_ws("bash-bg-orphan");
+    let started = Instant::now();
+    let events = run(reg(fast_limits()).execute(
+        "bash",
+        json!({ "command": "sleep 5 & echo started" }),
+        &ctx_for(&ws),
+    ))
+    .await;
+    assert_clean(&events);
+    assert!(terminal(&events).contains("started"));
+    assert!(
+        started.elapsed() < Duration::from_millis(1000),
+        "the run must finish at the child exit, not the timeout: {:?}",
+        started.elapsed()
+    );
+}

@@ -97,7 +97,8 @@ impl GrepTool {
         })?;
         let mut report = Report::default();
         if meta.is_file() {
-            report.search_file(&scope, &root, &scope, &matcher, &filter, self.limits);
+            let filter_base = scope.parent().unwrap_or(&scope);
+            report.search_file(&scope, &root, filter_base, &matcher, &filter, self.limits);
         } else {
             let limits = self.limits;
             let outcome = walk_files(
@@ -117,10 +118,11 @@ impl GrepTool {
 
 #[derive(Default)]
 struct Report {
-    lines: Vec<String>,
+    rows: Vec<(String, usize, String)>,
     skipped_sensitive: usize,
     skipped_oversize: usize,
     skipped_binary: usize,
+    skipped_unreadable: usize,
     capped: bool,
 }
 
@@ -129,8 +131,8 @@ impl Report {
         self.capped
     }
 
-    /// Search one file: oversize and binary files are skipped and
-    /// counted; matching lines become `path:line: excerpt` rows.
+    /// Search one file: oversize, binary, and unreadable files are
+    /// skipped and counted; matching lines become `path:line: excerpt` rows.
     fn search_file(
         &mut self,
         path: &std::path::Path,
@@ -150,7 +152,7 @@ impl Report {
             }
         }
         let Ok(meta) = std::fs::metadata(path) else {
-            self.skipped_binary = self.skipped_binary.saturating_add(1);
+            self.skipped_unreadable = self.skipped_unreadable.saturating_add(1);
             return;
         };
         if !meta.is_file() || meta.len() > limits.grep_file_cap as u64 {
@@ -158,7 +160,7 @@ impl Report {
             return;
         }
         let Ok(bytes) = std::fs::read(path) else {
-            self.skipped_binary = self.skipped_binary.saturating_add(1);
+            self.skipped_unreadable = self.skipped_unreadable.saturating_add(1);
             return;
         };
         if bytes.len() > limits.grep_file_cap || bytes[..bytes.len().min(BINARY_PROBE)].contains(&0)
@@ -178,20 +180,19 @@ impl Report {
             };
             let start = found.start().min(body.len());
             let tail = util::truncate_char_boundary(&body[start..], limits.grep_line_cap);
-            let row = format!("{}:{}: {}", display, idx + 1, tail);
-            self.lines.push(row);
-            if self.lines.len() >= limits.grep_max_results {
+            self.rows.push((display.clone(), idx + 1, tail.to_string()));
+            if self.rows.len() >= limits.grep_max_results {
                 self.capped = true;
                 return;
             }
         }
     }
 
-    fn render(&self, pattern: &str, limits: ToolLimits) -> String {
+    fn render(&mut self, pattern: &str, limits: ToolLimits) -> String {
+        self.rows.sort_unstable();
         let mut out = String::new();
-        for line in &self.lines {
-            out.push_str(line);
-            out.push('\n');
+        for (path, line, tail) in &self.rows {
+            out.push_str(&format!("{path}:{line}: {tail}\n"));
         }
         if self.skipped_oversize > 0 {
             out.push_str(&format!(
@@ -201,6 +202,12 @@ impl Report {
         }
         if self.skipped_binary > 0 {
             out.push_str(&format!("[skipped {} binary files]\n", self.skipped_binary));
+        }
+        if self.skipped_unreadable > 0 {
+            out.push_str(&format!(
+                "[skipped {} unreadable files]\n",
+                self.skipped_unreadable
+            ));
         }
         if self.skipped_sensitive > 0 {
             out.push_str(&format!(
@@ -214,7 +221,7 @@ impl Report {
                 limits.grep_max_results
             ));
         }
-        if self.lines.is_empty() {
+        if self.rows.is_empty() {
             out.push_str(&format!("no matches for `{pattern}`\n"));
         }
         out

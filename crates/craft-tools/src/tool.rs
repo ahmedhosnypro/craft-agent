@@ -2,6 +2,7 @@
 //! enforces against hostile input.
 
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -69,6 +70,16 @@ pub enum EnvSource {
     Explicit(Vec<(String, String)>),
 }
 
+/// The process environment as UTF-8 pairs; entries with non-UTF-8
+/// bytes are dropped rather than fatal.
+fn utf8_env_pairs<I>(env: I) -> impl Iterator<Item = (String, String)>
+where
+    I: IntoIterator<Item = (OsString, OsString)>,
+{
+    env.into_iter()
+        .filter_map(|(k, v)| Some((k.to_str()?.to_string(), v.to_str()?.to_string())))
+}
+
 /// Per-run context shared by every tool call: the workspace root, the
 /// child-env source, and the read stamps backing edit_file's
 /// prior-read and changed-on-disk guards.
@@ -100,11 +111,25 @@ impl ToolCtx {
         &self.workspace_root
     }
 
-    /// The scrubbed environment a tool child receives, computed per call.
+    /// The scrubbed environment a tool child receives, computed per call;
+    /// non-UTF-8 entries in the process env are dropped, never fatal.
     pub fn child_env(&self) -> Vec<(String, String)> {
         match &self.env {
-            EnvSource::Process => envscrub::scrub(std::env::vars()),
+            EnvSource::Process => envscrub::scrub(utf8_env_pairs(std::env::vars_os())),
             EnvSource::Explicit(pairs) => envscrub::scrub(pairs.iter().cloned()),
+        }
+    }
+
+    /// A configuration variable from the run's env source (not the
+    /// scrubbed child env). The gate knobs are read here; tests drive
+    /// them through explicit env pairs instead of the process env.
+    pub fn env_value(&self, name: &str) -> Option<String> {
+        match &self.env {
+            EnvSource::Process => std::env::var(name).ok(),
+            EnvSource::Explicit(pairs) => pairs
+                .iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value.clone()),
         }
     }
 
@@ -131,4 +156,25 @@ pub trait Tool: Send + Sync {
     fn description(&self) -> &'static str;
     fn params_schema(&self) -> Schema;
     fn execute(&self, args: Value, ctx: &ToolCtx) -> ToolStream;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::utf8_env_pairs;
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    #[test]
+    fn non_utf8_env_entries_are_dropped_not_fatal() {
+        let env = vec![
+            (OsString::from("KEEP"), OsString::from("yes")),
+            (
+                OsString::from("BAD_VALUE"),
+                OsString::from_vec(vec![0xff, 0xfe]),
+            ),
+            (OsString::from_vec(vec![0xff]), OsString::from("ok")),
+        ];
+        let kept: Vec<_> = utf8_env_pairs(env).collect();
+        assert_eq!(kept, vec![(String::from("KEEP"), String::from("yes"))]);
+    }
 }
