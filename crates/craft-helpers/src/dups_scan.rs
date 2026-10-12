@@ -21,6 +21,13 @@ struct Hit {
     index: usize,
 }
 
+/// A merged run of adjacent window hits in one file, kept-line indices.
+struct Run {
+    file: usize,
+    first: usize,
+    last: usize,
+}
+
 /// A merged run of window hits inside one file, in kept-line indices.
 struct Span {
     file: usize,
@@ -138,16 +145,20 @@ fn collect_spans(windows: &HashMap<u64, Vec<Hit>>, min_lines: usize) -> (Vec<Spa
         }
         let mut sorted: Vec<Hit> = hits.to_vec();
         sorted.sort_by_key(|hit| (hit.file, hit.index));
-        let mut runs: Vec<Hit> = Vec::new();
+        let mut runs: Vec<Run> = Vec::new();
         for hit in sorted {
             let extends = matches!(runs.last(), Some(run)
-                if run.file == hit.file && hit.index <= run.index.saturating_add(1));
+                if run.file == hit.file && hit.index <= run.last.saturating_add(1));
             if extends {
                 if let Some(run) = runs.last_mut() {
-                    run.index = run.index.max(hit.index);
+                    run.last = run.last.max(hit.index);
                 }
             } else {
-                runs.push(hit);
+                runs.push(Run {
+                    file: hit.file,
+                    first: hit.index,
+                    last: hit.index,
+                });
             }
         }
         let mut distinct = 0;
@@ -166,8 +177,8 @@ fn collect_spans(windows: &HashMap<u64, Vec<Hit>>, min_lines: usize) -> (Vec<Spa
             let id = spans.len();
             spans.push(Span {
                 file: run.file,
-                first: run.index,
-                last: run.index + min_lines - 1,
+                first: run.first,
+                last: run.last + min_lines - 1,
             });
             parent.push(id);
             group.push(id);

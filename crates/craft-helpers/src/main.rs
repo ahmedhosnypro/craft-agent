@@ -1,5 +1,6 @@
 //! craft-helpers: deterministic collection for the digest mission.
 
+use std::io::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use craft_helpers::cli::{Command, Lookback, PrsArgs, parse_cli};
@@ -64,8 +65,34 @@ fn prs_query(args: PrsArgs) -> Result<PrsQuery, HelperError> {
 }
 
 fn print_json<T: Serialize>(value: &T) -> Result<i32, HelperError> {
+    write_json(&mut std::io::stdout().lock(), value)
+}
+
+fn write_json<T: Serialize>(out: &mut dyn Write, value: &T) -> Result<i32, HelperError> {
     let text =
         serde_json::to_string_pretty(value).map_err(|err| HelperError::Output(err.to_string()))?;
-    println!("{text}");
+    writeln!(out, "{text}").map_err(|err| HelperError::Output(err.to_string()))?;
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct ClosedPipe;
+
+    impl Write for ClosedPipe {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("pipe closed"))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::other("pipe closed"))
+        }
+    }
+
+    #[test]
+    fn failed_write_is_a_typed_error_not_a_panic() {
+        let result = write_json(&mut ClosedPipe, &"report");
+        assert!(matches!(result, Err(HelperError::Output(_))));
+    }
 }

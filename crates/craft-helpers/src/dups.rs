@@ -1,5 +1,6 @@
 //! Duplicate-code scanning: the tree walk and line normalization.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -159,36 +160,32 @@ fn walk(
                 continue;
             }
             walk(root, &path, depth + 1, state, files, skipped);
-        } else if path.is_file() {
+        } else if path.is_file() && is_source(&name_lossy) {
             state.count += 1;
-            scan_path(root, &path, &name_lossy, files, skipped);
+            scan_path(root, &path, files, skipped);
         }
     }
 }
 
-fn scan_path(
-    root: &Path,
-    path: &Path,
-    name: &str,
-    files: &mut Vec<ScanFile>,
-    skipped: &mut Vec<String>,
-) {
-    if !is_source(name) {
-        return;
-    }
+fn scan_path(root: &Path, path: &Path, files: &mut Vec<ScanFile>, skipped: &mut Vec<String>) {
     let rel = rel_of(root, path);
-    let Ok(metadata) = std::fs::metadata(path) else {
+    let Ok(file) = std::fs::File::open(path) else {
         skipped.push(format!("{rel}: unreadable, skipped"));
         return;
     };
-    if metadata.len() > MAX_FILE_BYTES {
+    let mut text = String::new();
+    if file
+        .take(MAX_FILE_BYTES + 1)
+        .read_to_string(&mut text)
+        .is_err()
+    {
+        skipped.push(format!("{rel}: not valid utf-8, skipped"));
+        return;
+    }
+    if text.len() > MAX_FILE_BYTES as usize {
         skipped.push(format!("{rel}: size over {MAX_FILE_BYTES} bytes, skipped"));
         return;
     }
-    let Ok(text) = std::fs::read_to_string(path) else {
-        skipped.push(format!("{rel}: not valid utf-8, skipped"));
-        return;
-    };
     let mut kept = Vec::new();
     for (offset, raw) in text.lines().enumerate() {
         if let Some(text) = normalize_line(raw) {

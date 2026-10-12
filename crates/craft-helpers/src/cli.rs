@@ -96,7 +96,7 @@ fn parse_name(raw: &str) -> Result<String, HelperError> {
 
 /// `<n><s|m|h|d>` → a bounded look-back window; anything else is invalid.
 pub fn parse_lookback(raw: &str) -> Result<Lookback, HelperError> {
-    let invalid = || HelperError::InvalidWindow(raw.to_string());
+    let invalid = || HelperError::InvalidWindow(bounded(raw));
     let Some((split, unit)) = raw.char_indices().next_back() else {
         return Err(invalid());
     };

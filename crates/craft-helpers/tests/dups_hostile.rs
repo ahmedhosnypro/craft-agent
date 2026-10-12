@@ -104,6 +104,25 @@ fn file_count_per_root_is_capped() {
 }
 
 #[test]
+fn non_source_files_do_not_consume_the_file_cap() {
+    let root_a = temp_tree("cap-nosrc-a");
+    let root_b = temp_tree("cap-nosrc-b");
+    for index in 0..MAX_FILES_PER_ROOT {
+        put(&root_a, &format!("blob{index:04}.bin"), "not source");
+    }
+    let dup =
+        "let one = 1;\nlet two = 2;\nlet three = 3;\nlet four = 4;\nlet five = 5;\nlet six = 6;\n";
+    put(&root_a, "real.rs", dup);
+    put(&root_b, "twin.rs", dup);
+    let report = scan_dups(&roots_query(&[root_a.clone(), root_b.clone()], 6, 20)).unwrap();
+    assert!(report.skipped.is_empty());
+    assert_eq!(report.candidates.len(), 1);
+    assert_eq!(report.candidates[0].lines, 6);
+    let _ = std::fs::remove_dir_all(&root_a);
+    let _ = std::fs::remove_dir_all(&root_b);
+}
+
+#[test]
 fn window_total_is_capped() {
     let root = temp_tree("host-windows");
     let lines_per_file = 1_000;

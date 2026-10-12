@@ -130,6 +130,27 @@ fn deep(one: u8) -> u8 {
 }
 
 #[test]
+fn adjacent_identical_windows_cover_the_full_run() {
+    let root_a = temp_tree("run-a");
+    let root_b = temp_tree("run-b");
+    let repeated = "let same = 1;\n".repeat(10);
+    let head = "fn head() {}\nfn neck() {}\nfn torso() {}\n";
+    put(&root_a, "one.rs", &repeated);
+    put(&root_b, "two.rs", &format!("{head}{repeated}"));
+    let report = scan_dups(&roots_query(&[root_a.clone(), root_b.clone()], 6, 20)).unwrap();
+    assert_eq!(report.candidates.len(), 1);
+    let candidate = &report.candidates[0];
+    assert_eq!(candidate.lines, 10);
+    assert_eq!(candidate.occurrences.len(), 2);
+    assert_eq!(candidate.occurrences[0].file, "one.rs");
+    assert_eq!(candidate.occurrences[0].line, 1);
+    assert_eq!(candidate.occurrences[1].file, "two.rs");
+    assert_eq!(candidate.occurrences[1].line, 4);
+    let _ = std::fs::remove_dir_all(&root_a);
+    let _ = std::fs::remove_dir_all(&root_b);
+}
+
+#[test]
 fn distinct_trees_report_no_candidates() {
     let root_a = temp_tree("none-a");
     let root_b = temp_tree("none-b");

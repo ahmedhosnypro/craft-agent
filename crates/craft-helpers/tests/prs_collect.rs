@@ -177,3 +177,70 @@ fn global_cap_truncates_in_repo_order() {
     assert_eq!(report.repos[1].prs.len(), 1);
     assert!(report.errors.is_empty());
 }
+
+fn merged_page(rows: &[(u64, &str)]) -> String {
+    let mut body = String::from('[');
+    for (number, merged_at) in rows {
+        body.push_str(&format!(
+            "{{\"number\":{number},\"title\":\"t\",\"html_url\":\"u\",\"user\":{{\"login\":\"a\"}},\"merged_at\":\"{merged_at}\"}}"
+        ));
+        body.push(',');
+    }
+    body.pop();
+    body.push(']');
+    body
+}
+
+#[test]
+fn rate_limit_mid_entry_stops_the_repo() {
+    let org = "storytold";
+    let repo = "midlimit";
+    let page = format!(
+        "https://api.github.com/repos/{org}/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=1"
+    );
+    let body = merged_page(&[
+        (3, "2026-10-11T06:00:00Z"),
+        (2, "2026-10-11T05:00:00Z"),
+        (1, "2026-10-11T04:00:00Z"),
+    ]);
+    let mut fetch = FakeFetch::new().route(page, 200, body, None);
+    let detail = |number: u64| format!("https://api.github.com/repos/{org}/{repo}/pulls/{number}");
+    let files =
+        |number: u64| format!("https://api.github.com/repos/{org}/{repo}/pulls/{number}/files");
+    fetch = fetch
+        .route(detail(3), 200, "{\"additions\":1}".to_string(), None)
+        .route(files(3), 200, "[]".to_string(), None)
+        .route(detail(2), 429, "[]".to_string(), Some("60".to_string()));
+    let report = collect_prs(&fetch, &query(&[repo], 48 * 3600, 30, 50));
+    let numbers: Vec<u64> = report.repos[0].prs.iter().map(|pr| pr.number).collect();
+    assert_eq!(numbers, vec![3]);
+    assert_eq!(report.errors.len(), 1);
+    assert!(report.errors[0].message.contains("429"));
+}
+
+#[test]
+fn offset_timestamps_sort_by_instant_not_text() {
+    let org = "storytold";
+    let repo = "offsets";
+    let page = format!(
+        "https://api.github.com/repos/{org}/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=1"
+    );
+    // 11:00+02:00 is 09:00Z, older than 09:30Z despite sorting after it as text.
+    let body = merged_page(&[
+        (2, "2026-10-11T11:00:00+02:00"),
+        (1, "2026-10-11T09:30:00Z"),
+    ]);
+    let mut fetch = FakeFetch::new().route(page, 200, body, None);
+    let detail = |number: u64| format!("https://api.github.com/repos/{org}/{repo}/pulls/{number}");
+    let files =
+        |number: u64| format!("https://api.github.com/repos/{org}/{repo}/pulls/{number}/files");
+    fetch = fetch
+        .route(detail(1), 200, "{\"additions\":1}".to_string(), None)
+        .route(files(1), 200, "[]".to_string(), None)
+        .route(detail(2), 200, "{\"additions\":1}".to_string(), None)
+        .route(files(2), 200, "[]".to_string(), None);
+    let report = collect_prs(&fetch, &query(&[repo], 48 * 3600, 2, 50));
+    assert!(report.errors.is_empty());
+    let numbers: Vec<u64> = report.repos[0].prs.iter().map(|pr| pr.number).collect();
+    assert_eq!(numbers, vec![1, 2]);
+}

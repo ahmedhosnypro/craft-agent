@@ -137,7 +137,7 @@ fn collect_repo(
     cutoff: u64,
     budget: &mut usize,
 ) -> (Vec<PrsEntry>, Vec<String>) {
-    let mut matched: Vec<PullRow> = Vec::new();
+    let mut matched: Vec<(u64, PullRow)> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
     for page in 1..=MAX_PAGES {
         let url = pulls_page_url(&query.org, repo, page);
@@ -163,17 +163,18 @@ fn collect_repo(
             if let Some(secs) = parse_rfc3339_secs(&pull.merged_at)
                 && secs >= cutoff
             {
-                matched.push(pull);
+                matched.push((secs, pull));
             }
         }
         if matched.len() >= query.limit_per_repo || page_len < PER_PAGE {
             break;
         }
     }
-    matched.sort_by(|a, b| b.merged_at.cmp(&a.merged_at).then(b.number.cmp(&a.number)));
+    // Sort by the parsed instant: offset-form timestamps order wrongly as text.
+    matched.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.number.cmp(&a.1.number)));
     matched.truncate(query.limit_per_repo);
     let mut prs = Vec::new();
-    for pull in matched {
+    for (_, pull) in matched {
         if *budget == 0 {
             break;
         }
@@ -181,6 +182,10 @@ fn collect_repo(
             Ok(entry) => {
                 prs.push(entry);
                 *budget -= 1;
+            }
+            Err(err @ HelperError::RateLimited { .. }) => {
+                errors.push(err.to_string());
+                break;
             }
             Err(err) => errors.push(err.to_string()),
         }
