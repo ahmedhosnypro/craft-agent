@@ -7,7 +7,7 @@ use crate::{TestError, folded, provider, run, sample_request, terminal_count};
 use craft_core::types::{StopReason, ToolCall, Usage};
 
 async fn serve(body: String) -> Result<MockServer, TestError> {
-    let server = MockServer::start(vec![CannedResponse::sse(body.as_bytes())]).await?;
+    let server = MockServer::start(vec![CannedResponse::sse(body.as_bytes())], "/v1").await?;
     Ok(server)
 }
 
@@ -64,12 +64,24 @@ async fn tool_fragments_assemble_by_wire_index() -> Result<(), TestError> {
             },
         ]
     );
-    assert_eq!(turn.usage.input_tokens, 42);
-    assert_eq!(turn.usage.output_tokens, 9);
+    assert_eq!(turn.usage.input_tokens, 35);
+    assert_eq!(turn.usage.output_tokens, 5);
     assert_eq!(turn.usage.cache_read_tokens, 7);
     assert_eq!(turn.usage.reasoning_tokens, 4);
     assert!(!turn.usage.incomplete);
     assert_eq!(terminal_count(&events), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn usage_buckets_stay_disjoint_so_their_sum_is_the_wire_total() -> Result<(), TestError> {
+    let (turn, _) = turn_over(crate::wire::tool_stream()).await?;
+    let spent = turn.usage.input_tokens
+        + turn.usage.output_tokens
+        + turn.usage.cache_read_tokens
+        + turn.usage.cache_write_tokens
+        + turn.usage.reasoning_tokens;
+    assert_eq!(spent, 51, "cached and reasoning ride their own buckets");
     Ok(())
 }
 

@@ -7,7 +7,7 @@
 mod error_tests;
 #[path = "fixtures/gemini/hostile_tests.rs"]
 mod hostile_tests;
-#[path = "fixtures/gemini/mock.rs"]
+#[path = "fixtures/mock.rs"]
 mod mock;
 #[path = "fixtures/gemini/request_tests.rs"]
 mod request_tests;

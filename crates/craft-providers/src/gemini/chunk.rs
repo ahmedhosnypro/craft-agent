@@ -63,9 +63,13 @@ pub(super) struct WireUsage {
 }
 
 impl From<WireUsage> for Usage {
+    /// promptTokenCount already includes cachedContentTokenCount; report
+    /// the uncached remainder so the buckets stay disjoint.
     fn from(usage: WireUsage) -> Self {
         Self {
-            input_tokens: usage.prompt_token_count,
+            input_tokens: usage
+                .prompt_token_count
+                .saturating_sub(usage.cached_content_token_count),
             output_tokens: usage.candidates_token_count,
             cache_read_tokens: usage.cached_content_token_count,
             cache_write_tokens: 0,

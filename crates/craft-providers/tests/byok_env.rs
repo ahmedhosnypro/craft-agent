@@ -64,11 +64,19 @@ fn file_value(var: &str) -> Option<String> {
     None
 }
 
-// Process env wins; a set value (even empty) is final.
+// Process env wins; a set value (even empty, even non-UTF-8) is final.
 fn read_var(var: &str) -> Option<String> {
-    match std::env::var(var) {
+    read_var_resolved(std::env::var(var), var)
+}
+
+fn read_var_resolved(found: Result<String, std::env::VarError>, var: &str) -> Option<String> {
+    match found {
         Ok(value) => Some(value),
-        Err(_) => file_value(var),
+        Err(std::env::VarError::NotPresent) => file_value(var),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            eprintln!("SKIP: {var} is set but not valid UTF-8; the .env value is not used");
+            None
+        }
     }
 }
 
@@ -99,4 +107,21 @@ macro_rules! require_keys {
             }
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_var_resolved;
+
+    fn non_unicode() -> Result<String, std::env::VarError> {
+        Err(std::env::VarError::NotUnicode(std::ffi::OsString::new()))
+    }
+
+    // The resolved-lookup seam runs the NotUnicode arm without touching
+    // the live process environment or the repo .env.
+    #[test]
+    fn a_non_utf8_process_value_never_falls_back_to_the_file() {
+        let found = read_var_resolved(non_unicode(), "TEST_BYOK_BASE_URL");
+        assert_eq!(found, None);
+    }
 }

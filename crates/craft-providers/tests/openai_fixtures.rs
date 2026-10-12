@@ -6,7 +6,7 @@
 mod error_tests;
 #[path = "fixtures/openai/hostile_tests.rs"]
 mod hostile_tests;
-#[path = "fixtures/openai/mock.rs"]
+#[path = "fixtures/mock.rs"]
 mod mock;
 #[path = "fixtures/openai/request_tests.rs"]
 mod request_tests;
@@ -156,6 +156,7 @@ pub fn surfaced(events: &[Outcome]) -> Result<ProviderError, TestError> {
 pub fn detail_of(err: &ProviderError) -> &str {
     match err {
         ProviderError::Auth { detail }
+        | ProviderError::QuotaExhausted { detail }
         | ProviderError::Transient { detail }
         | ProviderError::PayloadTooLarge { detail }
         | ProviderError::ContextWindow { detail }

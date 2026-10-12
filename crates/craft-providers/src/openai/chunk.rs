@@ -67,17 +67,22 @@ pub(super) struct WireUsageDetails {
 }
 
 impl From<WireUsage> for Usage {
+    /// prompt_tokens already includes cached_tokens and completion_tokens
+    /// already includes reasoning_tokens; report the disjoint remainders
+    /// so the bucket sum matches total_tokens.
     fn from(usage: WireUsage) -> Self {
+        let cached = usage
+            .prompt_tokens_details
+            .map_or(0, |details| details.cached_tokens);
+        let reasoning = usage
+            .completion_tokens_details
+            .map_or(0, |details| details.reasoning_tokens);
         Self {
-            input_tokens: usage.prompt_tokens,
-            output_tokens: usage.completion_tokens,
-            cache_read_tokens: usage
-                .prompt_tokens_details
-                .map_or(0, |details| details.cached_tokens),
+            input_tokens: usage.prompt_tokens.saturating_sub(cached),
+            output_tokens: usage.completion_tokens.saturating_sub(reasoning),
+            cache_read_tokens: cached,
             cache_write_tokens: 0,
-            reasoning_tokens: usage
-                .completion_tokens_details
-                .map_or(0, |details| details.reasoning_tokens),
+            reasoning_tokens: reasoning,
             incomplete: false,
         }
     }

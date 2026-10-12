@@ -155,6 +155,7 @@ pub fn midstream_error_stream(kind: &str, code: Option<&str>) -> String {
 pub const AUTH_BODY: &str = r#"{"error":{"message":"Incorrect API key provided: <redacted>.","type":"invalid_request_error","param":null,"code":"invalid_api_key"}}"#;
 pub const FORBIDDEN_BODY: &str = r#"{"error":{"message":"Project does not have access to this model.","type":"invalid_request_error","param":null,"code":"model_not_allowed"}}"#;
 pub const RATE_BODY: &str = r#"{"error":{"message":"Rate limit reached for requests.","type":"rate_limit_error","param":null,"code":null}}"#;
+pub const QUOTA_BODY: &str = r#"{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","param":null,"code":"insufficient_quota"}}"#;
 pub const SERVER_BODY: &str = r#"{"error":{"message":"The server had an error while processing your request.","type":"server_error","param":null,"code":null}}"#;
 pub const CONTEXT_BODY: &str = r#"{"error":{"message":"This model's maximum context length is 128000 tokens. However, you requested 200000 tokens.","type":"invalid_request_error","param":"messages","code":"context_length_exceeded"}}"#;
 pub const NOT_FOUND_BODY: &str = r#"{"error":{"message":"The model 'no-such-model' does not exist or you do not have access to it.","type":"invalid_request_error","param":"model","code":"model_not_found"}}"#;

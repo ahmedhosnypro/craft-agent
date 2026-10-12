@@ -6,7 +6,7 @@
 mod error_tests;
 #[path = "fixtures/anthropic/hostile_tests.rs"]
 mod hostile_tests;
-#[path = "fixtures/anthropic/mock.rs"]
+#[path = "fixtures/mock.rs"]
 mod mock;
 #[path = "fixtures/anthropic/request_tests.rs"]
 mod request_tests;

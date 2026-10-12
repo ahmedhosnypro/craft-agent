@@ -1,5 +1,6 @@
-//! Loopback HTTP mock for the fixture corpus: canned responses in,
-//! captured requests out, one request per connection.
+//! Loopback HTTP mock shared by the provider fixture corpora: canned
+//! responses in, captured requests out, one request per connection. Each
+//! dialect passes its own base path to `MockServer::start`.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -61,9 +62,9 @@ pub struct MockServer {
 }
 
 impl MockServer {
-    /// Binds loopback and serves `responses` in order; requests beyond
-    /// the list repeat the last canned response.
-    pub async fn start(responses: Vec<CannedResponse>) -> std::io::Result<Self> {
+    /// Binds loopback and serves `responses` in order at `base_path`;
+    /// requests beyond the list repeat the last canned response.
+    pub async fn start(responses: Vec<CannedResponse>, base_path: &str) -> std::io::Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let addr = listener.local_addr()?;
         let log = Arc::new(Mutex::new(Vec::new()));
@@ -80,7 +81,7 @@ impl MockServer {
             }
         });
         Ok(Self {
-            base_url: format!("http://{addr}"),
+            base_url: format!("http://{addr}{base_path}"),
             log,
             handle,
         })

@@ -9,8 +9,11 @@ use craft_core::types::{ChatMessage, NativeBlocks, NativeDialect};
 use serde_json::Value;
 
 async fn serve_stream() -> Result<MockServer, TestError> {
-    let server =
-        MockServer::start(vec![CannedResponse::sse(wire::text_stream().as_bytes())]).await?;
+    let server = MockServer::start(
+        vec![CannedResponse::sse(wire::text_stream().as_bytes())],
+        "",
+    )
+    .await?;
     Ok(server)
 }
 
@@ -177,7 +180,7 @@ async fn json_object_results_ride_verbatim() -> Result<(), TestError> {
 
 #[tokio::test]
 async fn unpaired_tool_result_is_rejected_before_the_wire() -> Result<(), TestError> {
-    let server = MockServer::start(Vec::new()).await?;
+    let server = MockServer::start(Vec::new(), "").await?;
     let mut request = sample_request();
     request.messages = vec![ChatMessage::Tool {
         call_id: String::from("call_missing"),
@@ -198,7 +201,7 @@ async fn unpaired_tool_result_is_rejected_before_the_wire() -> Result<(), TestEr
 
 #[tokio::test]
 async fn malformed_arguments_are_rejected_before_the_wire() -> Result<(), TestError> {
-    let server = MockServer::start(Vec::new()).await?;
+    let server = MockServer::start(Vec::new(), "").await?;
     let mut request = sample_request();
     request.messages = vec![ChatMessage::Assistant {
         text: String::new(),
@@ -251,7 +254,7 @@ async fn gemini_native_blocks_replay_verbatim() -> Result<(), TestError> {
 
 #[tokio::test]
 async fn foreign_native_blocks_are_rejected_before_any_request() -> Result<(), TestError> {
-    let server = MockServer::start(Vec::new()).await?;
+    let server = MockServer::start(Vec::new(), "").await?;
     let mut request = sample_request();
     request.messages.push(ChatMessage::Assistant {
         text: String::new(),

@@ -13,7 +13,7 @@ use craft_core::events::{FoldError, ModelEvent, TurnCaps};
 use craft_core::types::Usage;
 
 async fn serve(body: &[u8]) -> Result<MockServer, TestError> {
-    let server = MockServer::start(vec![CannedResponse::sse(body)]).await?;
+    let server = MockServer::start(vec![CannedResponse::sse(body)], "/v1").await?;
     Ok(server)
 }
 
@@ -105,6 +105,18 @@ async fn midstream_rate_error_maps_rate_limit() -> Result<(), TestError> {
 }
 
 #[tokio::test]
+async fn midstream_quota_code_maps_quota_exhausted() -> Result<(), TestError> {
+    let body = wire::midstream_error_stream("rate_limit_error", Some("insufficient_quota"));
+    let events = events_over(body.as_bytes()).await?;
+    let err = surfaced(&events)?;
+    assert!(
+        matches!(err, ProviderError::QuotaExhausted { .. }),
+        "{err:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn midstream_context_code_maps_context_window() -> Result<(), TestError> {
     let body =
         wire::midstream_error_stream("invalid_request_error", Some("context_length_exceeded"));
@@ -174,5 +186,19 @@ async fn wire_end_after_the_finish_preserves_the_turn() -> Result<(), TestError>
         Usage::omitted(),
         "the missing accounting frame flags the turn incomplete"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn detail_counts_larger_than_their_totals_saturate() -> Result<(), TestError> {
+    let body = String::from(
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":3,\"total_tokens\":8,\"prompt_tokens_details\":{\"cached_tokens\":9},\"completion_tokens_details\":{\"reasoning_tokens\":12}}}\n\n",
+    );
+    let events = events_over(body.as_bytes()).await?;
+    let turn = crate::folded(&events)?;
+    assert_eq!(turn.usage.input_tokens, 0, "saturating, never underflow");
+    assert_eq!(turn.usage.output_tokens, 0, "saturating, never underflow");
+    assert_eq!(turn.usage.cache_read_tokens, 9);
+    assert_eq!(turn.usage.reasoning_tokens, 12);
     Ok(())
 }

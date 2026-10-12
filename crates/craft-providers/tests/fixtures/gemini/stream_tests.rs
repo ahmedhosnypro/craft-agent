@@ -8,7 +8,7 @@ use crate::{TestError, folded, provider, run, sample_request, terminal_count};
 use craft_core::types::{StopReason, ToolCall, Usage};
 
 async fn serve(body: String) -> Result<MockServer, TestError> {
-    let server = MockServer::start(vec![CannedResponse::sse(body.as_bytes())]).await?;
+    let server = MockServer::start(vec![CannedResponse::sse(body.as_bytes())], "").await?;
     Ok(server)
 }
 
@@ -29,7 +29,7 @@ async fn content_deltas_and_cumulative_usage_fold() -> Result<(), TestError> {
     assert_eq!(
         turn.usage,
         Usage {
-            input_tokens: 11,
+            input_tokens: 8,
             output_tokens: 2,
             cache_read_tokens: 3,
             cache_write_tokens: 0,
@@ -38,6 +38,12 @@ async fn content_deltas_and_cumulative_usage_fold() -> Result<(), TestError> {
         },
         "the terminal chunk's cumulative totals win per bucket"
     );
+    let spent = turn.usage.input_tokens
+        + turn.usage.output_tokens
+        + turn.usage.cache_read_tokens
+        + turn.usage.cache_write_tokens
+        + turn.usage.reasoning_tokens;
+    assert_eq!(spent, 17, "disjoint buckets sum to totalTokenCount");
     assert_eq!(
         terminal_count(&events),
         1,
@@ -183,7 +189,7 @@ async fn zero_content_terminal_folds_empty() -> Result<(), TestError> {
 async fn bom_prefixed_stream_parses() -> Result<(), TestError> {
     let (turn, _) = turn_over(wire::bom_text_stream()).await?;
     assert_eq!(turn.text, "Hello world");
-    assert_eq!(turn.usage.input_tokens, 11);
+    assert_eq!(turn.usage.input_tokens, 8);
     assert!(!turn.usage.incomplete);
     Ok(())
 }

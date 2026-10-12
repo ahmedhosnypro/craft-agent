@@ -12,7 +12,7 @@ use craft_core::error::ProviderError;
 use craft_core::events::TurnCaps;
 
 async fn serve(body: &[u8]) -> Result<MockServer, TestError> {
-    let server = MockServer::start(vec![CannedResponse::sse(body)]).await?;
+    let server = MockServer::start(vec![CannedResponse::sse(body)], "").await?;
     Ok(server)
 }
 
@@ -182,5 +182,14 @@ async fn oversized_text_hits_the_fold_caps() -> Result<(), TestError> {
         ),
         "got {err:?}"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn never_stopped_block_flood_hits_the_open_block_bound() -> Result<(), TestError> {
+    let events = events_over(wire::block_flood_stream(300).as_bytes()).await?;
+    let err = surfaced(&events)?;
+    assert!(matches!(err, ProviderError::Transport { .. }), "{err:?}");
+    assert!(detail_of(&err).contains("open content blocks"));
     Ok(())
 }

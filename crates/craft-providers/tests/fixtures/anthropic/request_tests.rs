@@ -10,8 +10,11 @@ use craft_core::types::{ChatMessage, NativeBlocks, NativeDialect};
 use serde_json::Value;
 
 async fn serve_stream() -> Result<MockServer, TestError> {
-    let server =
-        MockServer::start(vec![CannedResponse::sse(wire::text_stream().as_bytes())]).await?;
+    let server = MockServer::start(
+        vec![CannedResponse::sse(wire::text_stream().as_bytes())],
+        "",
+    )
+    .await?;
     Ok(server)
 }
 

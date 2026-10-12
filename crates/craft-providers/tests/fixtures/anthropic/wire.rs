@@ -271,3 +271,15 @@ pub fn oversized_text_stream(text: &str) -> String {
         EV_MESSAGE_STOP,
     ])
 }
+
+/// More never-stopped content blocks than the lane keeps open.
+pub fn block_flood_stream(count: usize) -> String {
+    let mut body = stream(&[EV_MESSAGE_START]);
+    for index in 0..count {
+        let event = format!(
+            "event: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":{index},\"content_block\":{{\"type\":\"text\",\"text\":\"\"}}}}\n\n"
+        );
+        body.push_str(&event);
+    }
+    body
+}

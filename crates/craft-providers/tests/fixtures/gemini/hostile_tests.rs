@@ -12,7 +12,7 @@ use craft_core::error::ProviderError;
 use craft_core::events::{FoldError, ModelEvent, TurnCaps};
 
 async fn serve(body: &[u8]) -> Result<MockServer, TestError> {
-    let server = MockServer::start(vec![CannedResponse::sse(body)]).await?;
+    let server = MockServer::start(vec![CannedResponse::sse(body)], "").await?;
     Ok(server)
 }
 
@@ -142,5 +142,16 @@ async fn unknown_chunk_fields_are_ignored() -> Result<(), TestError> {
     assert_eq!(turn.text, "ok");
     assert_eq!(turn.usage.input_tokens, 1);
     assert_eq!(terminal_count(&events), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn cached_counts_larger_than_the_prompt_saturate() -> Result<(), TestError> {
+    let events = events_over(wire::oversize_cached_stream().as_bytes()).await?;
+    let turn = crate::folded(&events)?;
+    assert_eq!(turn.usage.input_tokens, 0, "saturating, never underflow");
+    assert_eq!(turn.usage.output_tokens, 3);
+    assert_eq!(turn.usage.cache_read_tokens, 9);
+    assert_eq!(turn.usage.reasoning_tokens, 4);
     Ok(())
 }

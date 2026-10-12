@@ -73,9 +73,10 @@ async fn integration_stream_tools() -> Result<(), TestError> {
         assert!(!call.id.is_empty(), "each folded call must keep its id");
         assert!(!call.name.is_empty(), "each folded call must keep its name");
         assert!(
-            call.arguments.is_empty()
-                || serde_json::from_str::<serde_json::Value>(&call.arguments).is_ok(),
-            "each folded call's arguments must be complete JSON"
+            serde_json::from_str::<serde_json::Value>(&call.arguments)
+                .map(|args| args.get("city").is_some())
+                .unwrap_or(false),
+            "each folded call's arguments must assemble into JSON carrying the required city"
         );
     }
     println!(

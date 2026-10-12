@@ -9,8 +9,11 @@ use craft_core::types::{ChatMessage, NativeBlocks, NativeDialect};
 use serde_json::Value;
 
 async fn serve_stream() -> Result<MockServer, TestError> {
-    let server =
-        MockServer::start(vec![CannedResponse::sse(wire::text_stream().as_bytes())]).await?;
+    let server = MockServer::start(
+        vec![CannedResponse::sse(wire::text_stream().as_bytes())],
+        "/v1",
+    )
+    .await?;
     Ok(server)
 }
 
@@ -46,7 +49,7 @@ async fn request_carries_path_bearer_and_documented_body() -> Result<(), TestErr
                 {"role": "system", "content": "You are a digest agent."},
                 {"role": "user", "content": "Summarize the merged PRs."}
             ],
-            "max_tokens": 128,
+            "max_completion_tokens": 128,
             "stream": true,
             "stream_options": {"include_usage": true}
         }),
@@ -140,7 +143,7 @@ async fn tool_results_encode_with_the_dialect_flag_dropped() -> Result<(), TestE
 
 #[tokio::test]
 async fn foreign_native_blocks_are_rejected_before_any_request() -> Result<(), TestError> {
-    let server = MockServer::start(Vec::new()).await?;
+    let server = MockServer::start(Vec::new(), "/v1").await?;
     let mut request = sample_request();
     request.messages.push(ChatMessage::Assistant {
         text: String::new(),

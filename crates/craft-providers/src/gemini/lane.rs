@@ -1,151 +1,71 @@
-//! The decode lane: SSE events over one response fold into model events,
-//! the terminal is buffered while accounting frames merge usage, and
+//! The Gemini decode lane: camelCase chunk JSON folds into model
+//! events, the terminal buffers while accounting frames merge usage, and
 //! exactly one TurnFinished leaves the lane when the wire finishes.
-
-use std::collections::VecDeque;
-use std::pin::Pin;
 
 use craft_core::error::ProviderError;
 use craft_core::events::ModelEvent;
-use craft_core::provider::{ModelEventStream, boxed};
-use craft_core::sse::{SseError, SseEvent, SseOptions, SseReader};
-use craft_core::types::{StopReason, Usage};
-use futures::{Stream, StreamExt, stream};
+use craft_core::provider::ModelEventStream;
+use craft_core::sse::{SseEvent, SseOptions};
+use craft_core::types::StopReason;
 
 use super::chunk::{WireChunk, WireFunctionCall, WirePart};
-use crate::transport;
-
-type Reader = Pin<Box<dyn Stream<Item = Result<SseEvent, SseError<reqwest::Error>>> + Send>>;
+use crate::lane_driver::{LaneCommon, LaneDialect, mount};
 
 /// Mounts the decode lane over one connected response.
 pub(super) fn lane_stream(response: reqwest::Response, sse: SseOptions) -> ModelEventStream {
-    let reader: Reader = Box::pin(SseReader::new(response.bytes_stream(), sse));
-    boxed(stream::unfold(Lane::new(reader), step))
+    mount(response, sse, Dialect::default())
 }
 
-/// One pass over the wire: buffered terminal, merged usage, pending
-/// deltas, and the ended flag that closes the stream after the flush.
-struct Lane {
-    reader: Reader,
-    terminal: Option<StopReason>,
-    usage: Option<Usage>,
-    pending: VecDeque<ModelEvent>,
-    ended: bool,
+/// The Gemini decode state: the adapter-assigned tool-call index; the
+/// lane driver holds the rest.
+#[derive(Debug, Default)]
+pub(super) struct Dialect {
     tool_index: u64,
 }
 
-impl Lane {
-    fn new(reader: Reader) -> Self {
-        Self {
-            reader,
-            terminal: None,
-            usage: None,
-            pending: VecDeque::new(),
-            ended: false,
-            tool_index: 0,
+impl LaneDialect for Dialect {
+    /// One SSE event: the data JSON decodes permissively, usageMetadata
+    /// merges, a blocked prompt is the terminal stop, and the first
+    /// candidate's parts map onto delta events. The request never asks
+    /// for more than one candidate, so later ones are ignored.
+    fn consume(&mut self, common: &mut LaneCommon, event: SseEvent) -> Result<bool, ProviderError> {
+        let chunk: WireChunk = match serde_json::from_str(&event.data) {
+            Ok(chunk) => chunk,
+            Err(err) => return common.anomaly(format!("invalid chunk JSON: {err}")),
+        };
+        if let Some(usage) = chunk.usage_metadata {
+            common.record_usage(usage.into());
         }
-    }
-}
-
-async fn step(lane: Lane) -> Option<(Result<ModelEvent, ProviderError>, Lane)> {
-    let mut lane = lane;
-    loop {
-        if lane.ended {
-            return None;
+        if let Some(reason) = chunk
+            .prompt_feedback
+            .and_then(|feedback| feedback.block_reason)
+        {
+            record_terminal(common, StopReason::ContentFilter, &reason)?;
         }
-        if let Some(event) = lane.pending.pop_front() {
-            return Some((Ok(event), lane));
-        }
-        match lane.reader.next().await {
-            None => return end(lane),
-            Some(Err(err)) => {
-                if lane.terminal.is_none() {
-                    lane.ended = true;
-                    return Some((Err(from_sse(err)), lane));
+        if let Some(candidate) = chunk.candidates.into_iter().next() {
+            if let Some(content) = candidate.content {
+                for part in content.parts {
+                    push_part(common, self, part)?;
                 }
-                return end(lane);
             }
-            Some(Ok(event)) => match consume_sse(event, &mut lane) {
-                Ok(ended) if ended => return end(lane),
-                Ok(_) => {}
-                Err(err) => {
-                    lane.ended = true;
-                    return Some((Err(err), lane));
-                }
-            },
-        }
-    }
-}
-
-/// Ends the lane: the buffered stop reason and merged usage flush as the
-/// single TurnFinished; a wire end without one surfaces StreamClosed.
-fn end(lane: Lane) -> Option<(Result<ModelEvent, ProviderError>, Lane)> {
-    let Some(stop_reason) = lane.terminal.clone() else {
-        return Some((
-            Err(ProviderError::StreamClosed),
-            Lane {
-                ended: true,
-                ..lane
-            },
-        ));
-    };
-    let usage = lane.usage.unwrap_or_else(Usage::omitted);
-    Some((
-        Ok(ModelEvent::TurnFinished { stop_reason, usage }),
-        Lane {
-            ended: true,
-            ..lane
-        },
-    ))
-}
-
-/// One SSE event: the data JSON decodes permissively, usageMetadata
-/// merges, a blocked prompt is the terminal stop, and the first
-/// candidate's parts map onto delta events. The request never asks for
-/// more than one candidate, so later ones are ignored.
-fn consume_sse(event: SseEvent, lane: &mut Lane) -> Result<bool, ProviderError> {
-    let chunk: WireChunk = match serde_json::from_str(&event.data) {
-        Ok(chunk) => chunk,
-        Err(err) => return chunk_anomaly(lane, format!("invalid chunk JSON: {err}")),
-    };
-    if let Some(usage) = chunk.usage_metadata {
-        let usage = Usage::from(usage);
-        lane.usage = Some(lane.usage.map_or(usage, |known| known.merge(usage)));
-    }
-    if let Some(reason) = chunk
-        .prompt_feedback
-        .and_then(|feedback| feedback.block_reason)
-    {
-        record_terminal(lane, StopReason::ContentFilter, &reason)?;
-    }
-    if let Some(candidate) = chunk.candidates.into_iter().next() {
-        if let Some(content) = candidate.content {
-            for part in content.parts {
-                push_part(lane, part)?;
+            if let Some(reason) = candidate.finish_reason {
+                record_terminal(common, StopReason::from_gemini(&reason), &reason)?;
             }
         }
-        if let Some(reason) = candidate.finish_reason {
-            record_terminal(lane, StopReason::from_gemini(&reason), &reason)?;
-        }
+        Ok(false)
     }
-    Ok(false)
-}
-
-/// A malformed chunk after the terminal stands as the recorded turn; one
-/// before it is a typed transport failure.
-fn chunk_anomaly(lane: &Lane, detail: String) -> Result<bool, ProviderError> {
-    if lane.terminal.is_some() {
-        return Ok(true);
-    }
-    Err(ProviderError::Transport { detail })
 }
 
 /// One candidate part: thought parts and bare signatures never reach
 /// the turn, text streams, and a function call lands whole on the next
 /// adapter-assigned index.
-fn push_part(lane: &mut Lane, part: WirePart) -> Result<(), ProviderError> {
+fn push_part(
+    common: &mut LaneCommon,
+    dialect: &mut Dialect,
+    part: WirePart,
+) -> Result<(), ProviderError> {
     if let Some(call) = part.function_call {
-        return push_tool_call(lane, call);
+        return push_tool_call(common, dialect, call);
     }
     let Some(text) = part.text.filter(|text| !text.is_empty()) else {
         return Ok(());
@@ -153,17 +73,21 @@ fn push_part(lane: &mut Lane, part: WirePart) -> Result<(), ProviderError> {
     if part.thought {
         return Ok(());
     }
-    if lane.terminal.is_some() {
+    if common.terminal().is_some() {
         return Err(ProviderError::Transport {
             detail: String::from("content delta arrived after finishReason"),
         });
     }
-    lane.pending.push_back(ModelEvent::TextDelta { text });
+    common.push_pending(ModelEvent::TextDelta { text });
     Ok(())
 }
 
-fn push_tool_call(lane: &mut Lane, call: WireFunctionCall) -> Result<(), ProviderError> {
-    if lane.terminal.is_some() {
+fn push_tool_call(
+    common: &mut LaneCommon,
+    dialect: &mut Dialect,
+    call: WireFunctionCall,
+) -> Result<(), ProviderError> {
+    if common.terminal().is_some() {
         return Err(ProviderError::Transport {
             detail: String::from("functionCall part arrived after finishReason"),
         });
@@ -172,40 +96,29 @@ fn push_tool_call(lane: &mut Lane, call: WireFunctionCall) -> Result<(), Provide
         .map_err(|err| ProviderError::Transport {
             detail: format!("function args did not re-serialize: {err}"),
         })?;
-    lane.pending.push_back(ModelEvent::ToolCallDelta {
-        index: lane.tool_index,
+    common.push_pending(ModelEvent::ToolCallDelta {
+        index: dialect.tool_index,
         id: call.id,
         name: call.name,
         arguments,
     });
-    lane.tool_index = lane.tool_index.saturating_add(1);
+    dialect.tool_index = dialect.tool_index.saturating_add(1);
     Ok(())
 }
 
 fn record_terminal(
-    lane: &mut Lane,
+    common: &mut LaneCommon,
     stop_reason: StopReason,
     raw: &str,
 ) -> Result<(), ProviderError> {
-    match &lane.terminal {
-        None => lane.terminal = Some(stop_reason),
-        Some(known) if *known == stop_reason => {}
-        Some(_) => {
-            return Err(ProviderError::Transport {
-                detail: format!("conflicting finishReason: {raw}"),
-            });
+    match common.terminal() {
+        None => {
+            common.set_terminal(stop_reason);
+            Ok(())
         }
-    }
-    Ok(())
-}
-
-fn from_sse(err: SseError<reqwest::Error>) -> ProviderError {
-    match err {
-        SseError::Transport(err) => transport::classify(err),
-        SseError::Malformed { detail } => ProviderError::Transport { detail },
-        SseError::EventTooLarge { cap } => ProviderError::Transport {
-            detail: format!("SSE event exceeded {cap} bytes"),
-        },
-        SseError::Idle { .. } => ProviderError::IdleTimeout,
+        Some(known) if known == stop_reason => Ok(()),
+        Some(_) => Err(ProviderError::Transport {
+            detail: format!("conflicting finishReason: {raw}"),
+        }),
     }
 }

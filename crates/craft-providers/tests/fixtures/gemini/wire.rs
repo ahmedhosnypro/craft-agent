@@ -9,10 +9,10 @@ pub fn stream(events: &[&str]) -> String {
     body
 }
 
-const EV_HEL: &str = r#"data: {"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"},"index":0}],"usageMetadata":{"promptTokenCount":11,"candidatesTokenCount":1,"totalTokenCount":12},"modelVersion":"gemini-2.5-flash","responseId":"r1"}"#;
+const EV_HEL: &str = r#"data: {"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"},"index":0}],"usageMetadata":{"promptTokenCount":11,"candidatesTokenCount":1,"cachedContentTokenCount":3,"totalTokenCount":12},"modelVersion":"gemini-2.5-flash","responseId":"r1"}"#;
 const EV_LO: &str = r#"data: {"candidates":[{"content":{"parts":[{"text":"lo "}],"role":"model"},"index":0}],"modelVersion":"gemini-2.5-flash"}"#;
 const EV_PING: &str = ": keep-alive";
-const EV_WORLD: &str = r#"data: {"candidates":[{"content":{"parts":[{"text":"world"}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":11,"candidatesTokenCount":2,"thoughtsTokenCount":4,"cachedContentTokenCount":3,"totalTokenCount":20},"modelVersion":"gemini-2.5-flash"}"#;
+const EV_WORLD: &str = r#"data: {"candidates":[{"content":{"parts":[{"text":"world"}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":11,"candidatesTokenCount":2,"thoughtsTokenCount":4,"cachedContentTokenCount":3,"totalTokenCount":17},"modelVersion":"gemini-2.5-flash"}"#;
 
 /// Text deltas, a comment line, cumulative usage, and the terminal chunk.
 pub fn text_stream() -> String {
@@ -51,6 +51,13 @@ pub fn signature_tool_stream() -> String {
 }
 
 const EV_USAGE_TAIL: &str = r#"data: {"usageMetadata":{"promptTokenCount":14,"candidatesTokenCount":3,"totalTokenCount":17},"modelVersion":"gemini-2.5-flash"}"#;
+
+/// A finish chunk whose cached count exceeds its prompt count: a hostile
+/// or partial report that must saturate, never underflow.
+pub fn oversize_cached_stream() -> String {
+    let chunk = r#"data: {"candidates":[{"content":{"parts":[{"text":"ok"}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":3,"cachedContentTokenCount":9,"thoughtsTokenCount":4,"totalTokenCount":12}}"#;
+    stream(&[chunk])
+}
 
 /// A finish chunk followed by a usage-only accounting frame: one
 /// terminal, usage merged per bucket.

@@ -20,7 +20,7 @@ fn surfaced_error(events: &[Outcome]) -> Result<ProviderError, TestError> {
 
 #[tokio::test(start_paused = true)]
 async fn auth_401_fails_fast_without_retry() -> Result<(), TestError> {
-    let server = MockServer::start(vec![CannedResponse::json(401, wire::AUTH_BODY)]).await?;
+    let server = MockServer::start(vec![CannedResponse::json(401, wire::AUTH_BODY)], "").await?;
     let events = run(&provider(&server.base_url)?, sample_request()).await;
     let err = surfaced_error(&events)?;
     assert!(
@@ -34,7 +34,8 @@ async fn auth_401_fails_fast_without_retry() -> Result<(), TestError> {
 
 #[tokio::test(start_paused = true)]
 async fn auth_403_fails_fast_without_retry() -> Result<(), TestError> {
-    let server = MockServer::start(vec![CannedResponse::json(403, wire::FORBIDDEN_BODY)]).await?;
+    let server =
+        MockServer::start(vec![CannedResponse::json(403, wire::FORBIDDEN_BODY)], "").await?;
     let events = run(&provider(&server.base_url)?, sample_request()).await;
     let err = surfaced_error(&events)?;
     assert!(matches!(err, ProviderError::Auth { .. }), "got {err:?}");
@@ -44,7 +45,8 @@ async fn auth_403_fails_fast_without_retry() -> Result<(), TestError> {
 
 #[tokio::test(start_paused = true)]
 async fn overloaded_529_maps_transient() -> Result<(), TestError> {
-    let server = MockServer::start(vec![CannedResponse::json(529, wire::OVERLOADED_BODY)]).await?;
+    let server =
+        MockServer::start(vec![CannedResponse::json(529, wire::OVERLOADED_BODY)], "").await?;
     let events = run(&provider(&server.base_url)?, sample_request()).await;
     let err = surfaced_error(&events)?;
     assert!(
@@ -56,7 +58,7 @@ async fn overloaded_529_maps_transient() -> Result<(), TestError> {
 
 #[tokio::test(start_paused = true)]
 async fn invalid_request_400_maps_invalid_request() -> Result<(), TestError> {
-    let server = MockServer::start(vec![CannedResponse::json(400, wire::INVALID_BODY)]).await?;
+    let server = MockServer::start(vec![CannedResponse::json(400, wire::INVALID_BODY)], "").await?;
     let events = run(&provider(&server.base_url)?, sample_request()).await;
     let err = surfaced_error(&events)?;
     assert!(
@@ -72,7 +74,7 @@ async fn rate_limit_streak_honors_the_live_retry_after() -> Result<(), TestError
     let responses = (0..5)
         .map(|_| CannedResponse::json(429, wire::RATE_BODY).with_header("retry-after", "3"))
         .collect();
-    let server = MockServer::start(responses).await?;
+    let server = MockServer::start(responses, "").await?;
     let events = run(&provider(&server.base_url)?, sample_request()).await;
     let err = surfaced_error(&events)?;
     assert_eq!(
@@ -95,7 +97,7 @@ async fn rate_limit_without_header_falls_back_to_the_ladder() -> Result<(), Test
     let responses = (0..5)
         .map(|_| CannedResponse::json(429, wire::RATE_BODY))
         .collect();
-    let server = MockServer::start(responses).await?;
+    let server = MockServer::start(responses, "").await?;
     let events = run(&provider(&server.base_url)?, sample_request()).await;
     let err = surfaced_error(&events)?;
     assert_eq!(err, ProviderError::RateLimit { retry_after: None });
@@ -108,7 +110,7 @@ async fn server_errors_climb_the_full_ladder() -> Result<(), TestError> {
     let responses = (0..6)
         .map(|_| CannedResponse::json(500, wire::SERVER_BODY))
         .collect();
-    let server = MockServer::start(responses).await?;
+    let server = MockServer::start(responses, "").await?;
     let events = run(&provider(&server.base_url)?, sample_request()).await;
     let err = surfaced_error(&events)?;
     assert!(matches!(err, ProviderError::Transient { .. }), "{err:?}");
@@ -118,7 +120,7 @@ async fn server_errors_climb_the_full_ladder() -> Result<(), TestError> {
 
 #[tokio::test(start_paused = true)]
 async fn context_length_body_refines_to_context_window() -> Result<(), TestError> {
-    let server = MockServer::start(vec![CannedResponse::json(400, wire::CONTEXT_BODY)]).await?;
+    let server = MockServer::start(vec![CannedResponse::json(400, wire::CONTEXT_BODY)], "").await?;
     let events = run(&provider(&server.base_url)?, sample_request()).await;
     let err = surfaced_error(&events)?;
     assert!(

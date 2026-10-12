@@ -21,7 +21,7 @@ pub(super) fn encode(request: &ModelRequest, model: &str) -> Result<Value, Provi
     let mut body = serde_json::json!({
         "model": model,
         "messages": messages,
-        "max_tokens": request.max_tokens,
+        "max_completion_tokens": request.max_tokens,
         "stream": true,
         "stream_options": {"include_usage": true},
     });

@@ -73,6 +73,11 @@ async fn integration_tools() -> Result<(), TestError> {
         !call.id.is_empty(),
         "the tool call must carry the provider id"
     );
+    assert_eq!(
+        first.tool_calls.len(),
+        1,
+        "the replay attaches one tool result; extra calls would replay unanswered"
+    );
 
     let request = ModelRequest {
         system: Some(system),

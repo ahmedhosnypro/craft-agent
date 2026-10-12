@@ -9,7 +9,7 @@ use crate::{TestError, folded, provider, run, sample_request, terminal_count};
 use craft_core::types::{StopReason, Usage};
 
 async fn serve(body: String) -> Result<MockServer, TestError> {
-    let server = MockServer::start(vec![CannedResponse::sse(body.as_bytes())]).await?;
+    let server = MockServer::start(vec![CannedResponse::sse(body.as_bytes())], "").await?;
     Ok(server)
 }
 
