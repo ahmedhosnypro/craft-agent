@@ -41,6 +41,12 @@ pub struct RunConfig {
     /// None resolves `CRAFT_AGENT_RESULT_WINDOW_TURNS` (default 20,
     /// 0 disables trimming).
     pub result_window_turns: Option<u32>,
+    /// Per-result byte cap on the assembled prompt; None resolves
+    /// CRAFT_AGENT_RESULT_TRUNCATE_BYTES (default 4096, 0 disables).
+    pub result_truncate_bytes: Option<u64>,
+    /// Spill write root for truncated tails; None resolves RUNNER_TEMP,
+    /// falling back to the platform temp dir.
+    pub spill_root: Option<PathBuf>,
     pub turn_caps: TurnCaps,
     /// Outer bound on a stalled event stream; None disables it.
     pub idle_timeout: Option<Duration>,
@@ -58,6 +64,8 @@ impl RunConfig {
             max_tokens: 8192,
             step_attempts: None,
             result_window_turns: None,
+            result_truncate_bytes: None,
+            spill_root: None,
             turn_caps: TurnCaps::default(),
             idle_timeout: None,
             workspace_root,
@@ -103,6 +111,7 @@ impl<P: Provider + Send + Sync> Runner<P> {
         };
         let Prepared {
             result_window,
+            mut truncate,
             mut session,
         } = match prepare(&self.config, prompt) {
             Ok(prepared) => prepared,
@@ -138,7 +147,13 @@ impl<P: Provider + Send + Sync> Runner<P> {
             let folded = match self
                 .step_ctx()
                 .drive(
-                    request::build(&self.config, &self.registry, &session, result_window),
+                    request::build(
+                        &self.config,
+                        &self.registry,
+                        &session,
+                        result_window,
+                        &mut truncate,
+                    ),
                     turn,
                     &mut sink,
                     &mut total,
@@ -176,7 +191,7 @@ impl<P: Provider + Send + Sync> Runner<P> {
             if let Err(err) = session.append(ChatMessage::Assistant {
                 text: folded.text.clone(),
                 tool_calls: folded.tool_calls.clone(),
-                native_blocks: None,
+                native_blocks: folded.native_blocks.clone(),
             }) {
                 return self.finish(
                     &mut sink,

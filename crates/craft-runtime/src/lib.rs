@@ -1,8 +1,9 @@
 //! The agent run loop crate: drives a mounted provider and the tool
 //! registry turn by turn under fail-closed budgets, keeps the
 //! append-only session record verbatim (tool results older than the
-//! result window ride later prompts as size stubs), and emits the
-//! NDJSON run-event contract the headless writer serializes.
+//! result window ride later prompts as size stubs, oversized ones as
+//! head plus a spill pointer), and emits the NDJSON run-event contract
+//! the headless writer serializes.
 //!
 //! The app layer owns env and CLI wiring; it constructs the provider,
 //! the registry (its tool set is the permission posture), and a
@@ -22,6 +23,7 @@ mod prepare;
 mod request;
 mod step;
 mod trim;
+mod truncate;
 
 pub mod retry;
 
