@@ -20,6 +20,16 @@ pub struct AdmitBatch {
     pub count: u32,
 }
 
+/// What a spawn does when the pool is saturated: the blocking path
+/// refuses (its caller awaits the whole wave, so a queue would hang
+/// it), the detached path queues (its caller already returned at
+/// admission and collects by poll).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PoolFull {
+    Refuse,
+    Queue,
+}
+
 /// Envelope event queued for the runner; the parent turn is stamped
 /// at the drain.
 pub(crate) enum HubEvent {
@@ -84,12 +94,15 @@ impl SubagentHub {
     /// Fail-closed admission, before any spend. Every refusing
     /// dimension is named; zero provider calls are made on refusal.
     /// A batch reserves every member's slice up front — nothing
-    /// launches unless the whole batch fits.
+    /// launches unless the whole batch fits. A saturated pool refuses
+    /// a blocking spawn and queues a detached one; depth, total, and
+    /// budget refuse both.
     pub fn admit(
         &self,
         depth: u8,
         batch: AdmitBatch,
         profile: &str,
+        on_full: PoolFull,
     ) -> Result<Vec<String>, String> {
         let AdmitBatch { slice, count } = batch;
         let caps = self.settings().caps;
@@ -111,7 +124,7 @@ impl SubagentHub {
                 caps.max_total, state.spawned_total
             ));
         }
-        if state.running >= caps.max_concurrency {
+        if state.running >= caps.max_concurrency && on_full == PoolFull::Refuse {
             return Err(format!(
                 "concurrency: {} subagents are already running (cap {})",
                 state.running, caps.max_concurrency

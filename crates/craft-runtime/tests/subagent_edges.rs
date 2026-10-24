@@ -82,7 +82,12 @@ async fn depth_cap_removes_the_spawn_pair_at_the_ceiling() {
     );
     let refusal = shallow
         .hub
-        .admit(1, batch(100, 1), "repo-scout")
+        .admit(
+            1,
+            batch(100, 1),
+            "repo-scout",
+            craft_runtime::PoolFull::Refuse,
+        )
         .expect_err("a spawn from depth 1 under a depth-1 cap is refused");
     assert!(refusal.starts_with("depth:"), "{refusal}");
 }

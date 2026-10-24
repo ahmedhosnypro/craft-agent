@@ -4,7 +4,7 @@
 
 mod subagent_common;
 
-use craft_runtime::{AdmitBatch, ChildReport, SubagentCaps, SubagentHub};
+use craft_runtime::{AdmitBatch, ChildReport, PoolFull, SubagentCaps, SubagentHub};
 use std::sync::Arc;
 
 use subagent_common::{FakeProvider, Reply, RigSpec, rig, scout, text_reply, usage};
@@ -80,12 +80,14 @@ fn unlimited_batch(count: u32) -> AdmitBatch {
 #[test]
 fn admission_names_the_refusing_dimension() {
     let hub = bare_hub();
-    hub.admit(0, batch(100, 1), "repo-scout")
+    hub.admit(0, batch(100, 1), "repo-scout", PoolFull::Refuse)
         .expect("depth 0 under every cap admits");
-    let err = hub.admit(2, batch(100, 1), "repo-scout").unwrap_err();
+    let err = hub
+        .admit(2, batch(100, 1), "repo-scout", PoolFull::Refuse)
+        .unwrap_err();
     assert!(err.starts_with("depth:"), "{err}");
     assert!(
-        hub.admit(0, batch(0, 1), "repo-scout")
+        hub.admit(0, batch(0, 1), "repo-scout", PoolFull::Refuse)
             .unwrap_err()
             .starts_with("token budget:")
     );
@@ -104,11 +106,11 @@ fn total_concurrency_and_budget_dimensions_refuse() {
     );
     total_rig
         .hub
-        .admit(0, batch(10, 2), "repo-scout")
+        .admit(0, batch(10, 2), "repo-scout", PoolFull::Refuse)
         .expect("two members fit the total cap");
     let err = total_rig
         .hub
-        .admit(0, batch(10, 1), "repo-scout")
+        .admit(0, batch(10, 1), "repo-scout", PoolFull::Refuse)
         .unwrap_err();
     assert!(err.starts_with("total:"), "{err}");
 
@@ -123,12 +125,12 @@ fn total_concurrency_and_budget_dimensions_refuse() {
     );
     conc_rig
         .hub
-        .admit(0, batch(10, 1), "repo-scout")
+        .admit(0, batch(10, 1), "repo-scout", PoolFull::Refuse)
         .expect("one member runs");
     conc_rig.hub.launch("agent-1", 5, None);
     let err = conc_rig
         .hub
-        .admit(0, batch(10, 1), "repo-scout")
+        .admit(0, batch(10, 1), "repo-scout", PoolFull::Refuse)
         .unwrap_err();
     assert!(err.starts_with("concurrency:"), "{err}");
 
@@ -141,7 +143,7 @@ fn total_concurrency_and_budget_dimensions_refuse() {
     budget_rig.hub.publish_parent(usage(900, 0));
     let err = budget_rig
         .hub
-        .admit(0, batch(200, 1), "repo-scout")
+        .admit(0, batch(200, 1), "repo-scout", PoolFull::Refuse)
         .unwrap_err();
     assert!(err.starts_with("token budget:"), "{err}");
 }
@@ -152,11 +154,11 @@ fn batch_slices_reserve_jointly() {
     let tight = rig(RigSpec::memory("hub-joint", 1_000), provider, vec![scout()]);
     let hub = &tight.hub;
     let ids = hub
-        .admit(0, batch(400, 2), "repo-scout")
+        .admit(0, batch(400, 2), "repo-scout", PoolFull::Refuse)
         .expect("800 of 1000 fits");
     assert_eq!(ids, vec!["agent-1", "agent-2"]);
     assert!(
-        hub.admit(0, batch(300, 1), "repo-scout")
+        hub.admit(0, batch(300, 1), "repo-scout", PoolFull::Refuse)
             .unwrap_err()
             .starts_with("token budget:")
     );
@@ -172,7 +174,7 @@ fn unlimited_members_admit_past_a_tight_token_cap() {
     );
     let hub = &tight.hub;
     let ids = hub
-        .admit(0, unlimited_batch(4), "repo-scout")
+        .admit(0, unlimited_batch(4), "repo-scout", PoolFull::Refuse)
         .expect("unlimited members reserve nothing");
     assert_eq!(ids.len(), 4);
     let remaining = hub.settle(&ids[0], &report(50));
@@ -191,7 +193,9 @@ fn settle_is_exactly_once_and_ids_never_reuse() {
         vec![scout()],
     );
     let hub = &rig.hub;
-    let ids = hub.admit(0, batch(100, 2), "repo-scout").expect("admitted");
+    let ids = hub
+        .admit(0, batch(100, 2), "repo-scout", PoolFull::Refuse)
+        .expect("admitted");
     hub.launch(&ids[0], 5, None);
     let first = report(50);
     let remaining = hub.settle(&ids[0], &first);
@@ -210,7 +214,9 @@ fn settle_is_exactly_once_and_ids_never_reuse() {
     hub.settle(&ids[1], &report(30));
     assert_eq!(hub.running(), 0);
     assert_eq!(hub.take_events(1).len(), 4, "two started, two finished");
-    let next = hub.admit(0, batch(100, 1), "repo-scout").expect("more fit");
+    let next = hub
+        .admit(0, batch(100, 1), "repo-scout", PoolFull::Refuse)
+        .expect("more fit");
     assert_eq!(next, vec!["agent-3"], "ids are never reused");
 }
 
@@ -245,7 +251,9 @@ fn settle_of_unadmitted_or_settled_ids_returns_without_relocking() {
     let hub = bare_hub();
     let unknown = hub.settle("agent-99", &report(10));
     assert_eq!(unknown, 10_000, "an unknown id settles nothing");
-    let ids = hub.admit(0, batch(100, 1), "repo-scout").expect("admitted");
+    let ids = hub
+        .admit(0, batch(100, 1), "repo-scout", PoolFull::Refuse)
+        .expect("admitted");
     hub.launch(&ids[0], 5, None);
     hub.settle(&ids[0], &report(50));
     let again = hub.settle(&ids[0], &report(50));

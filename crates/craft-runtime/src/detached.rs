@@ -1,6 +1,10 @@
 //! Detached subagents: a spawn whose tool call returns at admission, a
 //! bounded pool of children running against the concurrency cap, and
-//! reports parked in the hub until the parent polls for them. The
+//! reports parked in the hub until the parent polls for them. A
+//! saturated pool queues a detached spawn instead of refusing it —
+//! the caller already returned at admission — and continuations a
+//! running child dispatched drain before fresh dispatches, so a PR's
+//! next stage never waits behind pipelines that have not started. The
 //! fail-closed laws of the blocking spawn hold unchanged: admission
 //! refuses before any spend, every child carries its own wall clock,
 //! and every admitted id ends as `completed`, `timed_out`, or
@@ -16,7 +20,7 @@ use futures::StreamExt;
 use crate::spawn::{TrackedChild, prepare_member};
 use crate::spawn_args::SpawnRequest;
 use crate::subagent::{BgMember, ParkedChild, SubagentHub, SubagentWiring};
-use crate::subagent_admit::AdmitBatch;
+use crate::subagent_admit::{AdmitBatch, PoolFull};
 
 /// The bounded drain a run's end holds for detached children whose
 /// wall clock is still live: long enough to collect a nearly-finished
@@ -26,21 +30,38 @@ pub const DETACHED_DRAIN: std::time::Duration = std::time::Duration::from_secs(6
 impl SubagentHub {
     /// Parks detached members and opens pool slots while the
     /// concurrency cap allows. Admission already happened fail-closed,
-    /// so this only dispatches.
-    pub(crate) fn accept_detached(&self, queued: VecDeque<BgMember>) {
-        self.lock_state().bg_queued.extend(queued);
+    /// so this only dispatches: a saturated pool queues the caller's
+    /// members instead of refusing the call. A member a running child
+    /// dispatched is a continuation, and it waits in the queue that
+    /// drains first.
+    pub(crate) fn accept_detached(&self, queued: VecDeque<BgMember>, continuation: bool) {
+        let mut state = self.lock_state();
+        if continuation {
+            state.bg_continuation.extend(queued);
+        } else {
+            state.bg_fresh.extend(queued);
+        }
+        drop(state);
         self.launch_queued();
     }
 
-    /// Launches queued members while slots are free. A launch owns no
-    /// parent turn: its task settles the child and re-enters here, so
-    /// the pool drains without the parent awaiting any wave.
+    /// Launches queued members while slots are free, continuations
+    /// before fresh dispatches. A launch owns no parent turn: its task
+    /// settles the child and re-enters here, so the pool drains
+    /// without the parent awaiting any wave.
     pub(crate) fn launch_queued(&self) {
         loop {
             if self.running() >= self.caps().max_concurrency {
                 return;
             }
-            let Some(member) = self.lock_state().bg_queued.pop_front() else {
+            let member = {
+                let mut state = self.lock_state();
+                state
+                    .bg_continuation
+                    .pop_front()
+                    .or_else(|| state.bg_fresh.pop_front())
+            };
+            let Some(member) = member else {
                 return;
             };
             let hub = member.child.hub();
@@ -162,7 +183,7 @@ pub(crate) fn drive(request: SpawnRequest, wiring: &SubagentWiring) -> ToolStrea
         slice: request.slice,
         count,
     };
-    let ids = match hub.admit(wiring.depth, batch, &profile_name) {
+    let ids = match hub.admit(wiring.depth, batch, &profile_name, PoolFull::Queue) {
         Ok(ids) => ids,
         Err(refusal) => {
             return craft_tools::event::error_stream(ToolError::SubagentFailed {
@@ -191,7 +212,11 @@ pub(crate) fn drive(request: SpawnRequest, wiring: &SubagentWiring) -> ToolStrea
             }
         }
     }
-    hub.accept_detached(queued);
+    // A dispatch from a running child continues that child's own
+    // work, so it queues ahead of dispatches the root parent has not
+    // started yet.
+    let continuation = wiring.depth > 0;
+    hub.accept_detached(queued, continuation);
     futures::stream::once(async move {
         Ok(ToolEvent::Terminal(ToolResult {
             output: accepted_line(&hub, &ids),
@@ -202,11 +227,21 @@ pub(crate) fn drive(request: SpawnRequest, wiring: &SubagentWiring) -> ToolStrea
 
 /// The immediate terminal: what was accepted, and how to read it back.
 fn accepted_line(hub: &SubagentHub, ids: &[String]) -> String {
+    let (running, continuation, fresh) = {
+        let state = hub.lock_state();
+        (
+            state.running,
+            state.bg_continuation.len(),
+            state.bg_fresh.len(),
+        )
+    };
     let mut out = format!(
-        "detached: {} accepted, {} running, {} queued; collect envelopes with poll_agents\n",
+        "detached: {} accepted, {} running, {} queued ({} continuation, {} fresh); collect envelopes with poll_agents\n",
         ids.len(),
-        hub.running(),
-        hub.lock_state().bg_queued.len(),
+        running,
+        continuation + fresh,
+        continuation,
+        fresh,
     );
     for id in ids {
         out.push_str("accepted: ");

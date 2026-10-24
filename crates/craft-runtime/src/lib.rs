@@ -55,4 +55,4 @@ pub use events::{CancelCategory, RuntimeEvent, ToolStreamName, redact_event};
 pub use outcome::{ExitStatus, RunOutcome};
 pub use runner::{DEFAULT_REQUEST_TOKENS, RunConfig, Runner};
 pub use subagent::{SubagentCaps, SubagentHub, SubagentSettings, SubagentWiring};
-pub use subagent_admit::AdmitBatch;
+pub use subagent_admit::{AdmitBatch, PoolFull};

@@ -163,8 +163,15 @@ pub(crate) struct HubState {
     pub(crate) settled: std::collections::HashSet<String>,
     pub(crate) child_usage: HashMap<String, Usage>,
     pub(crate) child_turn: HashMap<String, u32>,
-    /// Detached children waiting for a free slot, in dispatch order.
-    pub(crate) bg_queued: VecDeque<BgMember>,
+    /// Detached root-parent dispatches waiting for a free slot, in
+    /// dispatch order.
+    pub(crate) bg_fresh: VecDeque<BgMember>,
+    /// Detached children a running child spawned, also in dispatch
+    /// order: they drain before fresh work so a PR's next stage never
+    /// waits behind pipelines that have not started. Finite per PR —
+    /// a depth-`max_depth` child spawns nothing — so fresh work still
+    /// flows.
+    pub(crate) bg_continuation: VecDeque<BgMember>,
     /// Settled detached children the parent has not polled yet.
     pub(crate) bg_parked: HashMap<String, ParkedChild>,
 }
@@ -213,7 +220,8 @@ impl Default for HubState {
             settled: std::collections::HashSet::new(),
             child_usage: HashMap::new(),
             child_turn: HashMap::new(),
-            bg_queued: std::collections::VecDeque::new(),
+            bg_fresh: std::collections::VecDeque::new(),
+            bg_continuation: std::collections::VecDeque::new(),
             bg_parked: HashMap::new(),
         }
     }

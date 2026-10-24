@@ -7,6 +7,6 @@ pub mod rig;
 
 pub use provider::{FakeProvider, Reply, delayed, text_reply, tool_reply, usage};
 pub use rig::{
-    Rig, RigSpec, catalog, finished, parent_run, rig, run, scout, slowpoke, spawner, started,
-    tool_results, workspace, writer,
+    Rig, RigSpec, catalog, finished, parent_run, pipeline, rig, run, scout, slowpoke, spawner,
+    started, tool_results, workspace, writer,
 };

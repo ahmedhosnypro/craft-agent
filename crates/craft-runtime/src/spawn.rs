@@ -24,7 +24,7 @@ use crate::child::{ChildFuture, ChildKnobs, ChildRun, prepare_child};
 use crate::envelope::ChildReport;
 use crate::spawn_args::SpawnRequest;
 use crate::subagent::{SubagentHub, SubagentWiring};
-use crate::subagent_admit::AdmitBatch;
+use crate::subagent_admit::{AdmitBatch, PoolFull};
 use craft_core::subagent::SUBAGENT_OVERLAY;
 /// One child future with wall-clock arming and the settle-on-drop
 /// backstop: a dropped child settles exactly once — completed,
@@ -182,7 +182,10 @@ pub(crate) fn drive(request: SpawnRequest, wiring: &SubagentWiring) -> ToolStrea
         slice: request.slice,
         count,
     };
-    let ids = match hub.admit(wiring.depth, batch, &profile_name) {
+    // The blocking path refuses on a saturated pool: this call awaits
+    // the whole wave, so a refused batch is the caller's decision to
+    // retry — a queue would hang it.
+    let ids = match hub.admit(wiring.depth, batch, &profile_name, PoolFull::Refuse) {
         Ok(ids) => ids,
         Err(refusal) => {
             return craft_tools::event::error_stream(ToolError::SubagentFailed {

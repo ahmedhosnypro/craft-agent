@@ -78,6 +78,22 @@ pub fn spawner() -> AgentFile {
     )
 }
 
+/// A pipeline child: it spawns its own stage children and polls for
+/// them, for the nested-queue rows.
+pub fn pipeline() -> AgentFile {
+    profile(
+        "pr-pipeline",
+        Some(vec![
+            "spawn_agent",
+            "spawn_agents",
+            "poll_agents",
+            "read_file",
+        ]),
+        None,
+        "You run one PR's pipeline.",
+    )
+}
+
 /// A slow profile whose wall clock is 1 second.
 pub fn slowpoke() -> AgentFile {
     profile(

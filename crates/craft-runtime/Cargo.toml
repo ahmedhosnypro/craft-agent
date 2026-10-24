@@ -9,9 +9,9 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
-craft-core = { path = "../craft-core", version = "0.0.11" }
-craft-redact = { path = "../craft-redact", version = "0.0.11" }
-craft-tools = { path = "../craft-tools", version = "0.0.11" }
+craft-core = { path = "../craft-core", version = "0.0.12" }
+craft-redact = { path = "../craft-redact", version = "0.0.12" }
+craft-tools = { path = "../craft-tools", version = "0.0.12" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror.workspace = true
@@ -19,6 +19,6 @@ futures = { version = "0.3", default-features = false, features = ["std", "alloc
 tokio = { version = "1", features = ["time"] }
 
 [dev-dependencies]
-craft-providers = { path = "../craft-providers", version = "0.0.11" }
+craft-providers = { path = "../craft-providers", version = "0.0.12" }
 tokio = { version = "1", features = ["macros", "rt", "test-util"] }
 futures = { version = "0.3", features = ["std", "alloc"] }
