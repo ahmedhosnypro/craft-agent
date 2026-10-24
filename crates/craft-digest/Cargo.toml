@@ -9,9 +9,9 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
-craft-core = { path = "../craft-core", version = "0.0.12" }
-craft-runtime = { path = "../craft-runtime", version = "0.0.12" }
-craft-tools = { path = "../craft-tools", version = "0.0.12" }
+craft-core = { path = "../craft-core", version = "0.0.13" }
+craft-runtime = { path = "../craft-runtime", version = "0.0.13" }
+craft-tools = { path = "../craft-tools", version = "0.0.13" }
 regex = "1"
 serde_json = "1"
 thiserror.workspace = true

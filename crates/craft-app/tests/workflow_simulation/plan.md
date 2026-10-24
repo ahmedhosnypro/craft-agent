@@ -1,10 +1,10 @@
 ---
 name: sim-adopt
-description: "Synthetic rehearsal of the judged adoption workflow's per-PR architecture: sweep, one detached child per PR, merged gates, committers, rollup."
+description: "Synthetic rehearsal of the judged adoption workflow's per-PR-life architecture: sweep, one detached pipeline per PR running that PR's whole life, gates, one seal."
 args:
   window: { type: string, default: "7h" }
 limits:
-  max-steps: "12"
+  max-steps: "10"
   max-total-turns: "2000"
   max-total-tokens: "1000000"
   max-retries-per-step: "2"
@@ -27,16 +27,19 @@ steps:
     max-turns: "120"
     retry: "0"
     on-failure: stop
-    outputs: [verdict-files, draft-paths]
+    outputs: [pipeline-rows, filed-issues, opened-prs, pipeline-exceptions]
     body: |
-      SIM PIPELINE — one pipeline per PR: fire ONE detached spawn_agents
-      call (profile sim-classifier), one item per PR (six PRs total),
-      carrying `detached: true`. The call returns at admission; then
-      poll with `poll_agents` as each PR's verdict lands and advance
-      that PR immediately — a `rev-sync` verdict gets one detached
-      `spawn_agent` call to sim-applier, a `hoist` or `port` verdict one
-      detached `spawn_agent` call to sim-filer. Two actionable PRs,
-      four irrelevant, no batch shapes, no coordinator.
+      SIM PIPELINE — one pipeline per PR running that PR's WHOLE life:
+      fire ONE detached spawn_agents call (profile sim-pipeline), one
+      item per PR (six PRs total), carrying `detached: true`. The call
+      returns at admission. Each pipeline child spawns its own stage
+      children — one sim-classifier, then by class one sim-applier or
+      sim-filer, then its committer after a filing lease — and polls
+      ONLY its own ids. You poll ONLY the ids your spawn call named: the
+      hub is shared with every pipeline's stage children, so a bulk
+      drain would steal a sibling's envelope. Verify each pipeline's
+      ledger row and rollup section as its envelope lands; no batch
+      shapes, no coordinator.
   - id: pipeline-gate
     agent: sim-judge
     kind: judge
@@ -52,9 +55,10 @@ steps:
       max-feedback: "2"
     body: |
       GATE:pipeline — judge the per-PR output: one verdict file per PR
-      under run-ledger/classifier/ and one draft per actionable PR.
-      Count them with one bash pass. Your final message must be exactly
-      the verdict JSON and nothing else.
+      under run-ledger/classifier/, at most 3 entries in each filing
+      lease file under run-ledger/filing/, and one rollup section per PR
+      under run-ledger/rollup/. Count them with one bash pass. Your
+      final message must be exactly the verdict JSON and nothing else.
   - id: pipeline-appeal
     agent: sim-judge
     kind: judge
@@ -71,40 +75,21 @@ steps:
     body: |
       GATE:pipeline-appeal — re-derive the pipeline-gate rubric yourself
       and return the verdict JSON as your final message.
-  - id: file-commit
-    agent: sim-committer
-    needs: [pipeline-appeal]
-    max-turns: "40"
-    retry: "0"
-    on-failure: skip
-    outputs: [issue-rows]
-    body: |
-      SIM COMMIT — file: record one outcome row per ready finding under
-      run-ledger/outcomes/, then report the rows.
-  - id: bump-commit
-    agent: sim-committer
-    needs: [pipeline-appeal]
-    max-turns: "40"
-    retry: "0"
-    on-failure: skip
-    outputs: [pr-rows]
-    body: |
-      SIM COMMIT — bump: record one outcome row per ready bump under
-      run-ledger/outcomes/, then report the rows.
-  - id: rollup-draft
+  - id: rollup-seal
     agent: sim-orchestrator
-    needs: [prepare]
+    needs: [pr-pipeline]
     max-turns: "60"
     retry: "0"
     on-failure: stop
     outputs: [delivery-drafts]
     body: |
-      SIM ROLLUP — draft: fire ONE spawn_agent call (profile sim-rollup)
-      carrying the state snapshot, then report the paths.
+      SIM SEAL — compose: fire ONE spawn_agent call (profile sim-rollup)
+      carrying the state snapshot built from the pipelines' per-PR
+      rollup sections and the outcome rows, then report the paths.
   - id: rollup-gate
     agent: sim-judge
     kind: judge
-    needs: [rollup-draft]
+    needs: [rollup-seal]
     max-turns: "40"
     retry: "1"
     on-failure: stop
@@ -136,7 +121,7 @@ steps:
       return the verdict JSON as your final message.
   - id: rollup-commit
     agent: sim-committer
-    needs: [rollup-appeal]
+    needs: [rollup-appeal, pipeline-appeal]
     max-turns: "40"
     retry: "0"
     on-failure: skip
@@ -147,5 +132,5 @@ steps:
 ---
 
 Simulation rules: this plan is a local rehearsal of the judged adoption
-workflow's per-PR architecture. Every artifact is a local file; no
+workflow's per-PR-life architecture. Every artifact is a local file; no
 GitHub API is called and no network is touched.
