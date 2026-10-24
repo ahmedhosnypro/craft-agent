@@ -51,7 +51,7 @@ impl SubagentHub {
     /// without the parent awaiting any wave.
     pub(crate) fn launch_queued(&self) {
         loop {
-            if self.running() >= self.caps().max_concurrency {
+            if self.working() >= self.caps().max_concurrency {
                 return;
             }
             let member = {
@@ -81,12 +81,13 @@ impl SubagentHub {
     /// is exactly-once, so a report that loses the race is recorded
     /// without folding spend twice.
     pub(crate) fn park_report(&self, id: &str, report: crate::envelope::ChildReport) {
-        let profile = self
-            .lock_state()
-            .admitted
-            .get(id)
-            .map(|child| child.profile.clone())
-            .unwrap_or_default();
+        let (profile, origin) = {
+            let state = self.lock_state();
+            match state.admitted.get(id) {
+                Some(child) => (child.profile.clone(), child.origin),
+                None => (String::new(), 0),
+            }
+        };
         let remaining = self.settle(id, &report);
         self.lock_state().bg_parked.insert(
             id.to_string(),
@@ -94,17 +95,25 @@ impl SubagentHub {
                 report,
                 profile,
                 budget_remaining: remaining,
+                origin,
             },
         );
     }
 
-    /// Takes parked reports by id, or every parked report when the list
-    /// is empty. The envelopes come back in id order; a requested id
-    /// that is still outstanding simply does not arrive.
-    pub(crate) fn take_parked(&self, ids: &[String]) -> Vec<(String, ParkedChild)> {
+    /// Takes parked reports by id, or every parked report dispatched at
+    /// `origin`'s depth when the list is empty — a level's drain-all
+    /// collects its own dispatches, never another agent's. The
+    /// envelopes come back in id order; a requested id that is still
+    /// outstanding simply does not arrive.
+    pub(crate) fn take_parked(&self, ids: &[String], origin: u8) -> Vec<(String, ParkedChild)> {
         let mut state = self.lock_state();
         let picked: Vec<String> = if ids.is_empty() {
-            let mut all: Vec<String> = state.bg_parked.keys().cloned().collect();
+            let mut all: Vec<String> = state
+                .bg_parked
+                .iter()
+                .filter(|(_, child)| child.origin == origin)
+                .map(|(id, _)| id.clone())
+                .collect();
             all.sort();
             all
         } else {

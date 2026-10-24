@@ -156,6 +156,10 @@ pub(crate) struct HubState {
     pub(crate) child_settled: Usage,
     pub(crate) in_flight: u64,
     pub(crate) running: u32,
+    /// Launched children parked inside a poll wait. A waiter is not
+    /// working, and holding its slot would deadlock its own queued
+    /// stage children behind siblings that are also waiting.
+    pub(crate) waiting: u32,
     pub(crate) spawned_total: u32,
     pub(crate) next_id: u32,
     pub(crate) events: std::collections::VecDeque<crate::subagent_admit::HubEvent>,
@@ -179,6 +183,8 @@ pub(crate) struct HubState {
 pub(crate) struct AdmittedChild {
     pub(crate) slice: Option<u64>,
     pub(crate) profile: String,
+    /// Depth of the wiring that dispatched this child.
+    pub(crate) origin: u8,
 }
 
 /// One detached member awaiting its turn in the pool.
@@ -193,6 +199,8 @@ pub(crate) struct ParkedChild {
     pub(crate) report: crate::envelope::ChildReport,
     pub(crate) profile: String,
     pub(crate) budget_remaining: u64,
+    /// Depth of the wiring that dispatched this child.
+    pub(crate) origin: u8,
 }
 
 /// Token total across every usage bucket, matching the budget
@@ -213,6 +221,7 @@ impl Default for HubState {
             child_settled: crate::budget::zero_usage(),
             in_flight: 0,
             running: 0,
+            waiting: 0,
             spawned_total: 0,
             next_id: 0,
             events: std::collections::VecDeque::new(),

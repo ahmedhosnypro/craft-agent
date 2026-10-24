@@ -240,7 +240,7 @@ pub(crate) struct SpawnStream {
 
 impl SpawnStream {
     fn running_room(&self) -> bool {
-        self.hub.running() < self.hub.caps().max_concurrency
+        self.hub.working() < self.hub.caps().max_concurrency
     }
 
     fn launch_queued(&mut self) {

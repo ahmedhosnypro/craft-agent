@@ -124,10 +124,13 @@ impl SubagentHub {
                 caps.max_total, state.spawned_total
             ));
         }
-        if state.running >= caps.max_concurrency && on_full == PoolFull::Refuse {
+        if state.running.saturating_sub(state.waiting) >= caps.max_concurrency
+            && on_full == PoolFull::Refuse
+        {
             return Err(format!(
-                "concurrency: {} subagents are already running (cap {})",
-                state.running, caps.max_concurrency
+                "concurrency: {} subagents are already working (cap {})",
+                state.running.saturating_sub(state.waiting),
+                caps.max_concurrency
             ));
         }
         let need = slice.unwrap_or(0).saturating_mul(u64::from(count));
@@ -149,6 +152,7 @@ impl SubagentHub {
                 crate::subagent::AdmittedChild {
                     slice,
                     profile: profile.to_string(),
+                    origin: depth,
                 },
             );
             ids.push(id);
@@ -178,6 +182,34 @@ impl SubagentHub {
 
     pub fn running(&self) -> u32 {
         self.lock_state().running
+    }
+
+    /// Occupancy the cap bounds: launched children minus the ones
+    /// parked in a poll wait. Physical tasks never exceed the cap plus
+    /// the number of waiters — bounded, and a waiter's slot is what
+    /// its queued stage children run in.
+    pub(crate) fn working(&self) -> u32 {
+        let state = self.lock_state();
+        state.running.saturating_sub(state.waiting)
+    }
+
+    /// A child polls for work it dispatched: it releases its slot for
+    /// the duration of the wait, and the release opens pool slots
+    /// immediately. Only launched children poll, so the waiter count
+    /// is bounded by the launched count.
+    pub(crate) fn begin_wait(&self) {
+        {
+            let mut state = self.lock_state();
+            state.waiting = state.waiting.saturating_add(1);
+        }
+        self.launch_queued();
+    }
+
+    /// The wait ended — collected or timed out — so the child counts
+    /// against the cap again.
+    pub(crate) fn end_wait(&self) {
+        let mut state = self.lock_state();
+        state.waiting = state.waiting.saturating_sub(1);
     }
 
     /// Per-turn spend of a live child, for the timeout report.

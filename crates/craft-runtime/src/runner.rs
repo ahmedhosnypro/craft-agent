@@ -110,36 +110,41 @@ impl<P: Provider + Send + Sync> Runner<P> {
         }
     }
 
-    /// Runs the loop to its terminal outcome; every ending passes through
-    /// `finish`, so the terminal event and the outcome never disagree.
+    /// Runs the loop to its terminal outcome; every ending passes
+    /// through `finish`, so the terminal event and the outcome never
+    /// disagree, after the detached pool drains.
     pub async fn run(&self, prompt: &str, mut sink: impl FnMut(RuntimeEvent) + Send) -> RunOutcome {
         let step_attempts = match self.config.step_attempts {
             Some(attempts) => attempts,
             None => match retry::step_attempts_from_env() {
                 Ok(attempts) => attempts,
                 Err(err) => {
-                    return self.finish(
-                        &mut sink,
-                        ExitStatus::Error,
-                        CancelCategory::Error,
-                        err.to_string(),
-                        zero_usage(),
-                        0,
-                    );
+                    return self
+                        .finish(
+                            &mut sink,
+                            ExitStatus::Error,
+                            CancelCategory::Error,
+                            err.to_string(),
+                            zero_usage(),
+                            0,
+                        )
+                        .await;
                 }
             },
         };
         let mut prepared = match prepare(&self.config, prompt).await {
             Ok(prepared) => prepared,
             Err(detail) => {
-                return self.finish(
-                    &mut sink,
-                    ExitStatus::Error,
-                    CancelCategory::Error,
-                    detail,
-                    zero_usage(),
-                    0,
-                );
+                return self
+                    .finish(
+                        &mut sink,
+                        ExitStatus::Error,
+                        CancelCategory::Error,
+                        detail,
+                        zero_usage(),
+                        0,
+                    )
+                    .await;
             }
         };
         let ctx = ToolCtx::with_scopes(
@@ -156,14 +161,16 @@ impl<P: Provider + Send + Sync> Runner<P> {
             turn += 1;
             if turn > self.config.max_turns {
                 let detail = format!("run aborted after max turns ({})", self.config.max_turns);
-                return self.finish(
-                    &mut sink,
-                    ExitStatus::MaxTurns,
-                    CancelCategory::MaxTurns,
-                    detail,
-                    total,
-                    turn - 1,
-                );
+                return self
+                    .finish(
+                        &mut sink,
+                        ExitStatus::MaxTurns,
+                        CancelCategory::MaxTurns,
+                        detail,
+                        total,
+                        turn - 1,
+                    )
+                    .await;
             }
             sink(RuntimeEvent::TurnStarted { turn });
             let folded = match self
@@ -179,24 +186,28 @@ impl<P: Provider + Send + Sync> Runner<P> {
             {
                 Ok(folded) => folded,
                 Err(StepStop::Provider(err)) => {
-                    return self.finish(
-                        &mut sink,
-                        ExitStatus::Error,
-                        CancelCategory::Error,
-                        err.to_string(),
-                        total,
-                        turn - 1,
-                    );
+                    return self
+                        .finish(
+                            &mut sink,
+                            ExitStatus::Error,
+                            CancelCategory::Error,
+                            err.to_string(),
+                            total,
+                            turn - 1,
+                        )
+                        .await;
                 }
                 Err(StepStop::Budget(detail)) => {
-                    return self.finish(
-                        &mut sink,
-                        ExitStatus::Budget,
-                        CancelCategory::Budget,
-                        detail,
-                        total,
-                        turn - 1,
-                    );
+                    return self
+                        .finish(
+                            &mut sink,
+                            ExitStatus::Budget,
+                            CancelCategory::Budget,
+                            detail,
+                            total,
+                            turn - 1,
+                        )
+                        .await;
                 }
             };
             total = sum_usage(total, folded.usage);
@@ -216,14 +227,16 @@ impl<P: Provider + Send + Sync> Runner<P> {
                 })
                 .await
             {
-                return self.finish(
-                    &mut sink,
-                    ExitStatus::Error,
-                    CancelCategory::Error,
-                    err.to_string(),
-                    total,
-                    turn,
-                );
+                return self
+                    .finish(
+                        &mut sink,
+                        ExitStatus::Error,
+                        CancelCategory::Error,
+                        err.to_string(),
+                        total,
+                        turn,
+                    )
+                    .await;
             }
             if let Some(detail) = budget_status(&total, self.config.max_total_tokens) {
                 let (exit, category, reason) =
@@ -231,18 +244,22 @@ impl<P: Provider + Send + Sync> Runner<P> {
                         Ok(()) => (ExitStatus::Budget, CancelCategory::Budget, detail),
                         Err(err) => (ExitStatus::Error, CancelCategory::Error, err.to_string()),
                     };
-                return self.finish(&mut sink, exit, category, reason, total, turn);
+                return self
+                    .finish(&mut sink, exit, category, reason, total, turn)
+                    .await;
             }
             if folded.tool_calls.is_empty() {
                 let detail = String::from("run completed");
-                return self.finish(
-                    &mut sink,
-                    ExitStatus::Ok,
-                    CancelCategory::Completed,
-                    detail,
-                    total,
-                    turn,
-                );
+                return self
+                    .finish(
+                        &mut sink,
+                        ExitStatus::Ok,
+                        CancelCategory::Completed,
+                        detail,
+                        total,
+                        turn,
+                    )
+                    .await;
             }
             let flow = execute_calls(
                 &self.registry,
@@ -258,37 +275,43 @@ impl<P: Provider + Send + Sync> Runner<P> {
             if let Some(wiring) = &self.config.subagents {
                 total = sum_usage(total, wiring.after_tool_batch(turn, &mut sink));
                 if let Some(detail) = budget_status(&total, self.config.max_total_tokens) {
-                    return self.finish(
-                        &mut sink,
-                        ExitStatus::Budget,
-                        CancelCategory::Budget,
-                        detail,
-                        total,
-                        turn,
-                    );
+                    return self
+                        .finish(
+                            &mut sink,
+                            ExitStatus::Budget,
+                            CancelCategory::Budget,
+                            detail,
+                            total,
+                            turn,
+                        )
+                        .await;
                 }
             }
             match flow {
                 Ok(Flow::Continue) => {}
                 Ok(Flow::Stationary) => {
-                    return self.finish(
-                        &mut sink,
-                        ExitStatus::Stationarity,
-                        CancelCategory::Stationarity,
-                        String::from(STATIONARY_DETAIL),
-                        total,
-                        turn,
-                    );
+                    return self
+                        .finish(
+                            &mut sink,
+                            ExitStatus::Stationarity,
+                            CancelCategory::Stationarity,
+                            String::from(STATIONARY_DETAIL),
+                            total,
+                            turn,
+                        )
+                        .await;
                 }
                 Err(err) => {
-                    return self.finish(
-                        &mut sink,
-                        ExitStatus::Error,
-                        CancelCategory::Error,
-                        err.to_string(),
-                        total,
-                        turn,
-                    );
+                    return self
+                        .finish(
+                            &mut sink,
+                            ExitStatus::Error,
+                            CancelCategory::Error,
+                            err.to_string(),
+                            total,
+                            turn,
+                        )
+                        .await;
                 }
             }
         }
@@ -304,7 +327,8 @@ impl<P: Provider + Send + Sync> Runner<P> {
         }
     }
 
-    fn finish(
+    /// The shared endgame lives in `finish`; every ending rides it.
+    async fn finish(
         &self,
         sink: &mut (dyn FnMut(RuntimeEvent) + Send),
         exit: ExitStatus,
@@ -313,21 +337,6 @@ impl<P: Provider + Send + Sync> Runner<P> {
         usage: Usage,
         turns: u32,
     ) -> RunOutcome {
-        let detail = self.config.redactor.redact(&detail).into_owned();
-        sink(RuntimeEvent::RunFinished {
-            exit_code: exit.code(),
-            category,
-            detail: detail.clone(),
-            usage,
-            turns,
-        });
-        RunOutcome {
-            exit,
-            category,
-            detail,
-            usage,
-            turns,
-            session_path: self.config.session_path.clone(),
-        }
+        crate::finish::finish(&self.config, sink, exit, category, detail, usage, turns).await
     }
 }

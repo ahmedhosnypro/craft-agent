@@ -14,6 +14,15 @@
 progress.db
 progress.db-wal
 progress.db-shm
+review.db
+review.db-wal
+review.db-shm
 /scripts/progress-db.sql
 sim/runs/
 sim/logs/
+.csprobe/
+.tmp-calib/
+.tmp-e2e/
+.tmp-pb/
+/b1.rs
+/env_config.rs

@@ -1,7 +1,10 @@
 //! The `poll_agents` tool: collects the envelopes of detached children
 //! parked in the run's subagent hub, optionally waiting bounded for the
 //! next one to settle. A poll collecting nothing is normal state —
-//! work is still outstanding — never a tool error.
+//! work is still outstanding — never a tool error. A launched child
+//! waiting in a poll releases its pool slot for the duration: the
+//! waiter is not working, and holding the slot would deadlock the very
+//! stage children it waits for behind siblings that are also waiting.
 
 use std::time::Duration;
 
@@ -18,10 +21,11 @@ use crate::subagent::SubagentWiring;
 
 const DESCRIPTION: &str = "Collects the envelopes of detached \
 subagents launched with `detached: true`. Pass ids to collect specific \
-children, or omit the list to drain everything settled so far. With \
-`waitSecs` the poll waits up to that long for the next child to settle \
-before answering; 0 returns immediately. Ids that are unknown or were \
-already collected are a typed error.";
+children, or omit the list to drain every report dispatched at your own \
+level — a pipeline's stage children stay with the pipeline that spawned \
+them. With `waitSecs` the poll waits up to that long for the next child \
+to settle before answering; 0 returns immediately. Ids that are unknown \
+or were already collected are a typed error.";
 
 const PROPS: &[Prop] = &[
     Prop {
@@ -91,7 +95,8 @@ impl Tool for PollAgentsTool {
                 ),
             );
         }
-        futures::stream::once(async move { Ok(collect(&hub, &ids, wait).await) }).boxed()
+        let depth = self.wiring.depth;
+        futures::stream::once(async move { Ok(collect(&hub, &ids, wait, depth).await) }).boxed()
     }
 }
 
@@ -99,18 +104,40 @@ impl Tool for PollAgentsTool {
 /// everything collected. A poll answers as soon as at least one
 /// requested id parks, so several polls may drain one wave; the wait
 /// only bounds how long one call holds.
-async fn collect(hub: &crate::subagent::SubagentHub, ids: &[String], wait: u64) -> ToolEvent {
+///
+/// A launched child (`depth > 0`) yields its slot once it must actually
+/// wait: the release opens a pool slot immediately, so the stage
+/// children it dispatched queue-free run while it waits, and it
+/// re-acquires the count the moment the wait ends. The root parent
+/// never yields — it holds no slot.
+async fn collect(
+    hub: &crate::subagent::SubagentHub,
+    ids: &[String],
+    wait: u64,
+    depth: u8,
+) -> ToolEvent {
     if wait == 0 {
-        return terminal(hub, hub.take_parked(ids));
+        return terminal(hub, hub.take_parked(ids, depth));
     }
     let since = std::time::Instant::now();
+    let mut yielded = false;
     loop {
-        let collected = hub.take_parked(ids);
+        let collected = hub.take_parked(ids, depth);
         if !collected.is_empty() {
+            if yielded {
+                hub.end_wait();
+            }
             return terminal(hub, collected);
         }
         if since.elapsed().as_secs() >= wait {
+            if yielded {
+                hub.end_wait();
+            }
             return terminal(hub, Vec::new());
+        }
+        if !yielded && depth > 0 {
+            hub.begin_wait();
+            yielded = true;
         }
         tokio::time::sleep(TICK).await;
     }
