@@ -19,13 +19,13 @@ path = "src/main.rs"
 [dependencies]
 clap.workspace = true
 thiserror.workspace = true
-craft-core = { path = "../craft-core", version = "0.0.14" }
-craft-digest = { path = "../craft-digest", version = "0.0.14" }
-craft-providers = { path = "../craft-providers", version = "0.0.14" }
-craft-redact = { path = "../craft-redact", version = "0.0.14" }
-craft-runtime = { path = "../craft-runtime", version = "0.0.14" }
-craft-tools = { path = "../craft-tools", version = "0.0.14" }
-craft-workflow = { path = "../craft-workflow", version = "0.0.14" }
+craft-core = { path = "../craft-core", version = "0.0.15" }
+craft-digest = { path = "../craft-digest", version = "0.0.15" }
+craft-providers = { path = "../craft-providers", version = "0.0.15" }
+craft-redact = { path = "../craft-redact", version = "0.0.15" }
+craft-runtime = { path = "../craft-runtime", version = "0.0.15" }
+craft-tools = { path = "../craft-tools", version = "0.0.15" }
+craft-workflow = { path = "../craft-workflow", version = "0.0.15" }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "time", "sync", "macros"] }
 
