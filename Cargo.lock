@@ -223,7 +223,7 @@ dependencies = [
 
 [[package]]
 name = "craft-app"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "clap",
  "craft-core",
@@ -241,7 +241,7 @@ dependencies = [
 
 [[package]]
 name = "craft-core"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "bytes",
  "eventsource-stream",
@@ -255,7 +255,7 @@ dependencies = [
 
 [[package]]
 name = "craft-digest"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "craft-core",
  "craft-runtime",
@@ -269,7 +269,7 @@ dependencies = [
 
 [[package]]
 name = "craft-helpers"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "clap",
  "reqwest",
@@ -281,7 +281,7 @@ dependencies = [
 
 [[package]]
 name = "craft-mcp"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "craft-core",
  "craft-tools",
@@ -296,7 +296,7 @@ dependencies = [
 
 [[package]]
 name = "craft-providers"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "base64",
  "craft-core",
@@ -311,7 +311,7 @@ dependencies = [
 
 [[package]]
 name = "craft-redact"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "aho-corasick",
  "regex",
@@ -319,7 +319,7 @@ dependencies = [
 
 [[package]]
 name = "craft-runtime"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "craft-core",
  "craft-providers",
@@ -334,7 +334,7 @@ dependencies = [
 
 [[package]]
 name = "craft-tools"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "futures",
  "globset",
@@ -347,7 +347,7 @@ dependencies = [
 
 [[package]]
 name = "craft-workflow"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "futures",
  "serde",
