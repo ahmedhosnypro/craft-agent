@@ -38,6 +38,10 @@ pub struct RunConfig {
     /// Total attempts per model step after a mid-stream death; None
     /// resolves `CRAFT_AGENT_STEP_RETRIES` (default 3).
     pub step_attempts: Option<u32>,
+    /// Wall-clock budget a transient step failure may consume past the
+    /// attempt bound; None resolves `CRAFT_AGENT_RETRY_PATIENCE_SECS`
+    /// (default 30 minutes, 0 disables).
+    pub step_patience: Option<Duration>,
     /// Turns of tool results kept verbatim in the assembled prompt;
     /// None resolves `CRAFT_AGENT_RESULT_WINDOW_TURNS` (default 0,
     /// trimming off).
@@ -76,6 +80,7 @@ impl RunConfig {
             max_total_tokens: Some(4_000_000),
             max_tokens: DEFAULT_REQUEST_TOKENS,
             step_attempts: None,
+            step_patience: None,
             result_window_turns: None,
             result_truncate_bytes: None,
             spill_root: None,
@@ -118,34 +123,21 @@ impl<P: Provider + Send + Sync> Runner<P> {
             Some(attempts) => attempts,
             None => match retry::step_attempts_from_env() {
                 Ok(attempts) => attempts,
+                Err(err) => return self.finish_error(&mut sink, err.to_string()).await,
+            },
+        };
+        let step_patience = match self.config.step_patience {
+            Some(patience) => patience,
+            None => match retry::step_patience_from_env() {
+                Ok(patience) => patience,
                 Err(err) => {
-                    return self
-                        .finish(
-                            &mut sink,
-                            ExitStatus::Error,
-                            CancelCategory::Error,
-                            err.to_string(),
-                            zero_usage(),
-                            0,
-                        )
-                        .await;
+                    return self.finish_error(&mut sink, err.to_string()).await;
                 }
             },
         };
         let mut prepared = match prepare(&self.config, prompt).await {
             Ok(prepared) => prepared,
-            Err(detail) => {
-                return self
-                    .finish(
-                        &mut sink,
-                        ExitStatus::Error,
-                        CancelCategory::Error,
-                        detail,
-                        zero_usage(),
-                        0,
-                    )
-                    .await;
-            }
+            Err(detail) => return self.finish_error(&mut sink, detail).await,
         };
         let ctx = ToolCtx::with_scopes(
             self.config.workspace_root.clone(),
@@ -181,6 +173,7 @@ impl<P: Provider + Send + Sync> Runner<P> {
                     &mut sink,
                     &mut total,
                     step_attempts,
+                    step_patience,
                 )
                 .await
             {
@@ -338,5 +331,23 @@ impl<P: Provider + Send + Sync> Runner<P> {
         turns: u32,
     ) -> RunOutcome {
         crate::finish::finish(&self.config, sink, exit, category, detail, usage, turns).await
+    }
+
+    /// The knob-resolution ending: a hostile retry env value is a typed
+    /// error before the run starts.
+    async fn finish_error(
+        &self,
+        sink: &mut (dyn FnMut(RuntimeEvent) + Send),
+        detail: String,
+    ) -> RunOutcome {
+        self.finish(
+            sink,
+            ExitStatus::Error,
+            CancelCategory::Error,
+            detail,
+            zero_usage(),
+            0,
+        )
+        .await
     }
 }

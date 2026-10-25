@@ -123,6 +123,7 @@ impl TokenSource {
                     .form(&params)
             },
             token_failure,
+            craft_core::error::RETRY_PATIENCE_DEFAULT,
         )
         .await?;
         let body = crate::retry::read_capped(response, crate::retry::ERROR_BODY_CAP_BYTES).await;

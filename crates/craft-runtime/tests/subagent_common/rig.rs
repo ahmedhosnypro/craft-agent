@@ -176,6 +176,7 @@ pub fn rig(spec: RigSpec, provider: Arc<FakeProvider>, agents: Vec<AgentFile>) -
         parent_session: session.clone(),
         idle_timeout: None,
         step_attempts: Some(3),
+        step_patience: Some(std::time::Duration::ZERO),
     };
     let hub = craft_runtime::SubagentHub::mounting(settings, provider);
     let wiring = craft_runtime::SubagentWiring::root(hub.clone());

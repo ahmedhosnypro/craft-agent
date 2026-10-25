@@ -109,11 +109,10 @@ fn mount_workflow_hub(
 ) -> Result<SubagentWiring, AppError> {
     let caps = SubagentCaps::from_env().map_err(|detail| AppError::SubagentCap { detail })?;
     if caps.max_depth == 0 {
-        return Err(AppError::SubagentCap {
-            detail: String::from(
-                "CRAFT_AGENT_SUBAGENT_MAX_DEPTH is 0 — workflow steps could not spawn subagents",
-            ),
-        });
+        let detail = String::from(
+            "CRAFT_AGENT_SUBAGENT_MAX_DEPTH is 0 — workflow steps could not spawn subagents",
+        );
+        return Err(AppError::SubagentCap { detail });
     }
     let catalog =
         load_catalog(workspace_root).map_err(|source| AppError::WorkflowCatalog { source })?;
@@ -128,6 +127,7 @@ fn mount_workflow_hub(
         parent_session: Some(sessions_dir.join("subagents.jsonl")),
         idle_timeout,
         step_attempts: None,
+        step_patience: None,
     };
     let provider = production_mount(env_config.clone())(&env_config.model)
         .map_err(|detail| AppError::SubagentCap { detail })?;

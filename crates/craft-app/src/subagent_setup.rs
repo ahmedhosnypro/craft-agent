@@ -45,6 +45,7 @@ pub fn mount(
         parent_session: config.session_path.clone(),
         idle_timeout: config.idle_timeout,
         step_attempts: config.step_attempts,
+        step_patience: None,
     };
     let hub = SubagentHub::mounting(settings, provider);
     Ok(Some(SubagentWiring::root(hub)))

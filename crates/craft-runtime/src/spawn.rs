@@ -152,6 +152,7 @@ pub(crate) fn prepare_member(
         session_path,
         idle_timeout: settings.idle_timeout,
         step_attempts: settings.step_attempts,
+        step_patience: settings.step_patience,
         spawn: Some(child_wiring),
         deny_read: Vec::new(),
         deny_write: Vec::new(),

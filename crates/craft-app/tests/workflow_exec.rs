@@ -7,6 +7,7 @@ mod workflow_common;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use craft_app::workflow_exec::{StepMount, WorkflowExecutor, map_conclusion, map_usage};
 use craft_core::error::ProviderError;
@@ -68,6 +69,7 @@ fn executor_over(
         Some(3),
         agents,
     )
+    .with_step_patience(Some(Duration::ZERO))
 }
 
 fn agent_map() -> BTreeMap<String, craft_core::agents::AgentFile> {

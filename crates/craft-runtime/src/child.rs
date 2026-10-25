@@ -38,6 +38,7 @@ pub struct ChildKnobs {
     pub session_path: Option<PathBuf>,
     pub idle_timeout: Option<Duration>,
     pub step_attempts: Option<u32>,
+    pub step_patience: Option<Duration>,
     pub spawn: Option<SubagentWiring>,
     pub deny_read: Vec<String>,
     pub deny_write: Vec<String>,
@@ -78,6 +79,7 @@ pub fn prepare_child(
     config.max_tokens = knobs.per_request_tokens;
     config.idle_timeout = knobs.idle_timeout;
     config.step_attempts = knobs.step_attempts;
+    config.step_patience = knobs.step_patience;
     config.session_path = knobs.session_path;
     config.subagents = spawn;
     config.deny_read = knobs.deny_read;

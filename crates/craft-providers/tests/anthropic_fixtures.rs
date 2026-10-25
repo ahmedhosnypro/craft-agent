@@ -20,6 +20,7 @@ mod stream_tests;
 mod wire;
 
 use std::error::Error;
+use std::time::Duration;
 
 use craft_core::error::ProviderError;
 use craft_core::events::{FoldError, FoldedTurn, ModelEvent, TurnCaps, TurnFold};
@@ -36,7 +37,11 @@ pub const KEY: &str = "test-key-never-live";
 pub const MODEL: &str = "claude-haiku-5-5";
 
 pub fn provider(base_url: &str) -> Result<AnthropicProvider, TestError> {
-    AnthropicProvider::new(base_url, MODEL, KEY).map_err(|err| Box::new(err) as TestError)
+    // The ladder rows pin attempt-bound semantics: the patience
+    // window is disabled in the fixtures.
+    let provider =
+        AnthropicProvider::new(base_url, MODEL, KEY).map_err(|err| Box::new(err) as TestError)?;
+    Ok(provider.with_retry_patience(Duration::ZERO))
 }
 
 pub fn tool_spec(name: &str) -> ToolSpec {

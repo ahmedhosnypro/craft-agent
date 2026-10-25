@@ -6,8 +6,7 @@
 #[path = "../workflow_common/mod.rs"]
 mod workflow_common;
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use craft_app::workflow_exec::{StepMount, WorkflowExecutor};
 use craft_core::agents::{AgentCatalog, AgentFile};
@@ -54,6 +53,7 @@ fn hub_over(workspace_root: std::path::PathBuf, provider: Arc<FakeProvider>) -> 
         parent_session: None,
         idle_timeout: None,
         step_attempts: None,
+        step_patience: None,
     };
     SubagentWiring::root(SubagentHub::mounting(settings, provider))
 }
@@ -88,7 +88,6 @@ fn inputs_turns(max_turns: u32) -> StepInputs {
         ..inputs()
     }
 }
-
 fn inputs_seat(seat: u32) -> StepInputs {
     StepInputs {
         seat: Some(seat),

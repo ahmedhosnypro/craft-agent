@@ -28,6 +28,7 @@ pub struct OpenAiProvider {
     base_url: String,
     model: String,
     api_key: String,
+    retry_patience: Duration,
     sse: craft_core::sse::SseOptions,
 }
 
@@ -39,6 +40,7 @@ impl OpenAiProvider {
             base_url: base_url.trim_end_matches('/').to_owned(),
             model: model.to_owned(),
             api_key: api_key.to_owned(),
+            retry_patience: craft_core::error::RETRY_PATIENCE_DEFAULT,
             sse: craft_core::sse::SseOptions::default(),
         })
     }
@@ -69,8 +71,15 @@ impl OpenAiProvider {
                     .body(payload.clone())
             },
             http_failure,
+            self.retry_patience,
         )
         .await
+    }
+
+    /// Remounts the lane over the shared transient-patience window.
+    pub fn with_retry_patience(mut self, patience: Duration) -> Self {
+        self.retry_patience = patience;
+        self
     }
 }
 

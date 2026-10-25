@@ -4,8 +4,12 @@
 
 use crate::mock::{CannedResponse, MockServer};
 use crate::wire;
+use crate::{KEY, MODEL};
 use crate::{Outcome, TestError, detail_of, provider, run, sample_request};
 use craft_core::error::ProviderError;
+use craft_core::events::ModelEvent;
+use craft_core::types::StopReason;
+use craft_providers::openai::OpenAiProvider;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -218,5 +222,31 @@ async fn stalled_gateway_surfaces_timeout_and_rides_the_ladder() -> Result<(), T
         accepted.load(Ordering::Relaxed) >= 2,
         "the timeout row must ride the retry ladder"
     );
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn transient_5xx_rides_past_the_round_bound_while_patience_lasts() -> Result<(), TestError> {
+    // Eight 504s exceed the shared 6-round bound; under an open
+    // patience window the ninth request meets the canned success.
+    let mut responses: Vec<CannedResponse> = (0..8)
+        .map(|_| CannedResponse::json(504, wire::SERVER_BODY))
+        .collect();
+    responses.push(CannedResponse::json(200, &wire::text_stream()));
+    let server = MockServer::start(responses, "/v1").await?;
+    let provider = OpenAiProvider::new(&server.base_url, MODEL, KEY)?
+        .with_retry_patience(Duration::from_secs(10_000));
+    let events = run(&provider, sample_request()).await;
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            Ok(ModelEvent::TurnFinished {
+                stop_reason: StopReason::EndTurn,
+                ..
+            })
+        )),
+        "the ninth request must succeed: {events:?}"
+    );
+    assert_eq!(server.request_count(), 9);
     Ok(())
 }

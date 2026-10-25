@@ -52,8 +52,10 @@ impl<P: Provider + Send + Sync> StepCtx<'_, P> {
         sink: &mut (dyn FnMut(RuntimeEvent) + Send),
         total: &mut Usage,
         attempts: u32,
+        patience: Duration,
     ) -> Result<FoldedTurn, StepStop> {
         let mut attempt = 0u32;
+        let started = tokio::time::Instant::now();
         loop {
             attempt = attempt.saturating_add(1);
             let (err, replay) = match self.attempt(request.clone(), turn, sink).await {
@@ -72,12 +74,15 @@ impl<P: Provider + Send + Sync> StepCtx<'_, P> {
                     return Err(StepStop::Provider(err));
                 }
             };
-            if attempt >= attempts {
-                return Err(StepStop::Provider(err));
-            }
             let Some((reason, wait)) = replay else {
                 return Err(StepStop::Provider(err));
             };
+            // A transient class rides past the attempt bound while the
+            // patience window is open; zero patience restores the bound
+            // alone.
+            if attempt >= attempts && started.elapsed() >= patience {
+                return Err(StepStop::Provider(err));
+            }
             if let Some(detail) = budget_status(total, self.max_total_tokens) {
                 return Err(StepStop::Budget(detail));
             }

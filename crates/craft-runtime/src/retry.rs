@@ -43,6 +43,13 @@ pub fn step_attempts_from_env() -> Result<u32, ProviderError> {
     }
 }
 
+/// The patience window from the live environment: how long a step may
+/// keep replaying transient failures after its attempt bound.
+pub fn step_patience_from_env() -> Result<Duration, ProviderError> {
+    craft_core::error::retry_patience_from_env()
+        .map_err(|detail| ProviderError::InvalidRequest { detail })
+}
+
 fn invalid(raw: &str) -> ProviderError {
     ProviderError::InvalidRequest {
         detail: format!(

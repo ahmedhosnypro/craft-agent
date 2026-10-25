@@ -148,6 +148,7 @@ pub fn rig(name: &str) -> Rig {
         parent_session: None,
         idle_timeout: None,
         step_attempts: None,
+        step_patience: None,
     };
     let hub = SubagentWiring::root(SubagentHub::mounting(settings, provider.clone()));
     let plan_text = include_str!("plan.md");

@@ -10,6 +10,33 @@ pub const RETRY_BACKOFF_INITIAL_SECS: u64 = 2;
 pub const RETRY_BACKOFF_CAP_SECS: u64 = 30;
 pub const RATE_LIMIT_STREAK: usize = 5;
 
+/// Wall-clock budget a transient failure may consume before the caller
+/// surfaces it: while the window is open, every ladder keeps replaying
+/// past its attempt bound; zero restores the attempt bound alone.
+pub const RETRY_PATIENCE_ENV: &str = "CRAFT_AGENT_RETRY_PATIENCE_SECS";
+pub const RETRY_PATIENCE_DEFAULT: Duration = Duration::from_secs(1800);
+
+/// One patience value from a raw env string: unset or empty keeps the
+/// default, zero disables, otherwise whole seconds.
+pub fn retry_patience(raw: Option<&str>) -> Result<Duration, String> {
+    let Some(raw) = raw.filter(|raw| !raw.is_empty()) else {
+        return Ok(RETRY_PATIENCE_DEFAULT);
+    };
+    let secs = raw.trim().parse::<u64>().map_err(|_| {
+        format!("{RETRY_PATIENCE_ENV} must be a whole number of seconds, 0 disables; got `{raw}`")
+    })?;
+    Ok(Duration::from_secs(secs))
+}
+
+/// The patience window from the live process environment.
+pub fn retry_patience_from_env() -> Result<Duration, String> {
+    match std::env::var(RETRY_PATIENCE_ENV) {
+        Ok(value) => retry_patience(Some(&value)),
+        Err(std::env::VarError::NotPresent) => retry_patience(None),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
 /// Every provider failure mode, closed set. Adapters refine body-driven
 /// cases (for example a context-window rejection inside a 400) before
 /// surfacing.

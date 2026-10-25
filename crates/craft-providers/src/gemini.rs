@@ -38,6 +38,7 @@ pub struct GeminiProvider {
     base_url: String,
     model: String,
     api_key: String,
+    retry_patience: Duration,
     sse: craft_core::sse::SseOptions,
 }
 
@@ -49,6 +50,7 @@ impl GeminiProvider {
             base_url: base_url.trim_end_matches('/').to_owned(),
             model: model.to_owned(),
             api_key: api_key.to_owned(),
+            retry_patience: craft_core::error::RETRY_PATIENCE_DEFAULT,
             sse: craft_core::sse::SseOptions::default(),
         })
     }
@@ -58,6 +60,12 @@ impl GeminiProvider {
     pub fn with_request_timeout(mut self, timeout: Duration) -> Result<Self, ProviderError> {
         self.client = transport::client_with_timeout(timeout)?;
         Ok(self)
+    }
+
+    /// Remounts the lane over the shared transient-patience window.
+    pub fn with_retry_patience(mut self, patience: Duration) -> Self {
+        self.retry_patience = patience;
+        self
     }
 
     /// Sends one streaming request on the shared ladder, mounted over
@@ -82,6 +90,7 @@ impl GeminiProvider {
                     .body(payload.clone())
             },
             http_failure,
+            self.retry_patience,
         )
         .await
     }

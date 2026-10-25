@@ -95,6 +95,7 @@ pub struct SubagentSettings {
     pub parent_session: Option<PathBuf>,
     pub idle_timeout: Option<Duration>,
     pub step_attempts: Option<u32>,
+    pub step_patience: Option<Duration>,
 }
 
 /// One runner's view of the hub. Only the root wiring publishes

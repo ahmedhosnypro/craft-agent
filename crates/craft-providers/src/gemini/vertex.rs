@@ -67,6 +67,7 @@ impl Mount {
 pub struct VertexProvider {
     client: reqwest::Client,
     mount: Mount,
+    retry_patience: Duration,
     sse: craft_core::sse::SseOptions,
     tokens: tokio::sync::OnceCell<Box<TokenSource>>,
 }
@@ -104,6 +105,7 @@ impl VertexProvider {
         Ok(Self {
             client: transport::client()?,
             mount,
+            retry_patience: craft_core::error::RETRY_PATIENCE_DEFAULT,
             sse: craft_core::sse::SseOptions::default(),
             tokens,
         })
@@ -159,8 +161,15 @@ impl VertexProvider {
                     .body(payload.clone())
             },
             http_failure,
+            self.retry_patience,
         )
         .await
+    }
+
+    /// Remounts the lane over the shared transient-patience window.
+    pub fn with_retry_patience(mut self, patience: Duration) -> Self {
+        self.retry_patience = patience;
+        self
     }
 }
 

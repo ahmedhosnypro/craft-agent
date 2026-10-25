@@ -32,6 +32,7 @@ struct StepKnobs {
     step_token_cap: Option<u64>,
     idle_timeout: Option<Duration>,
     step_attempts: Option<u32>,
+    step_patience: Option<Duration>,
 }
 
 /// The production `StepExecutor`: the caller injects the provider
@@ -72,6 +73,7 @@ impl<P: Provider + Send + Sync> WorkflowExecutor<P> {
                 step_token_cap,
                 idle_timeout,
                 step_attempts,
+                step_patience: None,
             },
             agents,
             subagents: None,
@@ -83,6 +85,13 @@ impl<P: Provider + Send + Sync> WorkflowExecutor<P> {
     /// needs this. Without it a step keeps today's spawn-less registry.
     pub fn with_subagents(mut self, wiring: Option<SubagentWiring>) -> Self {
         self.subagents = wiring;
+        self
+    }
+
+    /// Overrides the steps' transient-patience window; None keeps the
+    /// env resolution inside each step's own runner.
+    pub fn with_step_patience(mut self, patience: Option<Duration>) -> Self {
+        self.knobs.step_patience = patience;
         self
     }
 
@@ -160,6 +169,7 @@ fn prepare_step_child(
             session_path: Some(session_path),
             idle_timeout: knobs.idle_timeout,
             step_attempts: knobs.step_attempts,
+            step_patience: knobs.step_patience,
             spawn: subagents.clone(),
             deny_read,
             deny_write,

@@ -32,6 +32,7 @@ use craft_runtime::{CancelCategory, RunConfig, RunOutcome, Runner};
 fn config() -> RunConfig {
     let mut config = RunConfig::new(std::path::PathBuf::from("."));
     config.step_attempts = Some(1);
+    config.step_patience = Some(std::time::Duration::ZERO);
     config
 }
 

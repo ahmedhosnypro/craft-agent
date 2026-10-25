@@ -32,6 +32,9 @@ use std::time::Duration;
 fn config(attempts: u32) -> RunConfig {
     let mut config = RunConfig::new(PathBuf::from("."));
     config.step_attempts = Some(attempts);
+    // The attempt-bound rows: the patience window is disabled so the
+    // knob alone bounds the ladder.
+    config.step_patience = Some(Duration::ZERO);
     config
 }
 

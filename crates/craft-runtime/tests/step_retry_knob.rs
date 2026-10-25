@@ -36,3 +36,34 @@ fn hostile_knob_values_surface_typed_errors_naming_the_knob() {
         assert!(err.to_string().contains(raw), "{err}");
     }
 }
+
+#[test]
+fn the_patience_rows_match_the_transport_parse_idiom() {
+    use std::time::Duration;
+    assert_eq!(
+        craft_core::error::retry_patience(None),
+        Ok(Duration::from_secs(
+            craft_core::error::RETRY_PATIENCE_DEFAULT.as_secs()
+        ))
+    );
+    assert_eq!(
+        craft_core::error::retry_patience(Some("")),
+        Ok(craft_core::error::RETRY_PATIENCE_DEFAULT)
+    );
+    assert_eq!(
+        craft_core::error::retry_patience(Some(" 90 ")),
+        Ok(Duration::from_secs(90))
+    );
+    assert_eq!(
+        craft_core::error::retry_patience(Some("0")),
+        Ok(Duration::ZERO),
+        "zero disables: the attempt bound binds alone"
+    );
+    for raw in ["garbage", "-5", "1.5"] {
+        let err = craft_core::error::retry_patience(Some(raw))
+            .err()
+            .unwrap_or_else(|| panic!("a hostile value must fail, not fall back: {raw}"));
+        assert!(err.contains(craft_core::error::RETRY_PATIENCE_ENV), "{err}");
+        assert!(err.contains(raw), "{err}");
+    }
+}

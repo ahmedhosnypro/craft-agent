@@ -59,6 +59,7 @@ fn terminal_hub(
         parent_session: Some(sessions_dir.join("subagents.jsonl")),
         idle_timeout: None,
         step_attempts: None,
+        step_patience: None,
     };
     SubagentWiring::root(SubagentHub::mounting(settings, provider))
 }

@@ -1,6 +1,6 @@
 //! The connect ladder shared by the adapters: bounded attempts,
-//! exponential backoff clamped by a live Retry-After, and the capped
-//! non-2xx body read.
+//! exponential backoff clamped by a live Retry-After, the capped
+//! non-2xx body read, and the shared transient-patience window.
 
 use std::future::Future;
 use std::time::Duration;
@@ -25,6 +25,7 @@ pub(crate) async fn climb<B, F, Fut>(
     client: &reqwest::Client,
     build: B,
     http_failure: F,
+    patience: Duration,
 ) -> Result<reqwest::Response, ProviderError>
 where
     B: Fn(&reqwest::Client) -> reqwest::RequestBuilder,
@@ -33,19 +34,20 @@ where
 {
     let mut backoff = Duration::from_secs(RETRY_BACKOFF_INITIAL_SECS);
     let mut rate_streak = 0usize;
-    let mut last = None;
-    for round in 1..=RETRY_MAX_ATTEMPTS {
+    let started = tokio::time::Instant::now();
+    let mut round = 0usize;
+    loop {
+        round += 1;
         let failure = match build(client).send().await {
             Ok(response) if response.status().is_success() => return Ok(response),
             Ok(response) => http_failure(response).await,
             Err(err) => transport::classify(err),
         };
-        last = Some(failure.clone());
         let wait = match &failure {
             ProviderError::RateLimit { retry_after } => {
                 rate_streak += 1;
                 if rate_streak >= RATE_LIMIT_STREAK {
-                    break;
+                    return Err(failure);
                 }
                 let ceiling = Duration::from_secs(RETRY_BACKOFF_CAP_SECS);
                 Some(retry_after.map_or(backoff, |after| after.min(ceiling)))
@@ -61,15 +63,15 @@ where
         let Some(wait) = wait else {
             return Err(failure);
         };
-        if round == RETRY_MAX_ATTEMPTS {
+        // Transient failures ride past the round bound while the
+        // patience window is open; the window and the 2s floor on every
+        // wait bound the loop together.
+        if round >= RETRY_MAX_ATTEMPTS && started.elapsed() >= patience {
             return Err(failure);
         }
         tokio::time::sleep(wait).await;
         backoff = ladder_step(backoff);
     }
-    Err(last.unwrap_or(ProviderError::Transport {
-        detail: String::from("the retry ladder exhausted without an attempt"),
-    }))
 }
 
 /// Reads at most `cap` bytes of a response body, lossily.
