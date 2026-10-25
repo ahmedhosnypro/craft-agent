@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
@@ -16,6 +17,8 @@ pub struct CannedResponse {
     status: u16,
     headers: Vec<(String, String)>,
     body: Vec<u8>,
+    /// In-flight stall before the response is served.
+    delay: Duration,
 }
 
 impl CannedResponse {
@@ -24,6 +27,7 @@ impl CannedResponse {
             status,
             headers: vec![(String::from("content-type"), String::from(content_type))],
             body,
+            delay: Duration::ZERO,
         }
     }
 
@@ -37,6 +41,11 @@ impl CannedResponse {
 
     pub fn with_header(mut self, name: &str, value: &str) -> Self {
         self.headers.push((String::from(name), String::from(value)));
+        self
+    }
+
+    pub fn with_delay(mut self, delay: Duration) -> Self {
+        self.delay = delay;
         self
     }
 }
@@ -113,10 +122,12 @@ async fn serve_connection(
     sink.lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .push(String::from_utf8_lossy(&raw).into_owned());
-    let response = match responses.get(index).or_else(|| responses.last()) {
-        Some(response) => response,
-        None => return,
+    let Some(response) = responses.get(index).or_else(|| responses.last()) else {
+        return;
     };
+    if !response.delay.is_zero() {
+        tokio::time::sleep(response.delay).await;
+    }
     let _ = write_response(&mut socket, response).await;
     let _ = socket.shutdown().await;
 }

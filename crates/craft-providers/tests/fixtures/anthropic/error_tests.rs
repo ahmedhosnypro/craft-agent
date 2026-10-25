@@ -160,3 +160,23 @@ async fn stalled_gateway_surfaces_timeout_and_rides_the_ladder() -> Result<(), T
     );
     Ok(())
 }
+
+#[tokio::test(start_paused = true)]
+async fn late_client_error_rides_the_patience_window_as_transient() -> Result<(), TestError> {
+    // A 400 served only after a long in-flight stall is an upstream
+    // artifact: it rides the ladder and the retry meets the canned
+    // success, while patience stays open.
+    let responses = vec![
+        CannedResponse::json(400, wire::INVALID_BODY).with_delay(Duration::from_secs(130)),
+        CannedResponse::json(200, &wire::text_stream()),
+    ];
+    let server = MockServer::start(responses, "").await?;
+    let provider = provider(&server.base_url)?.with_retry_patience(Duration::from_secs(10_000));
+    let events = run(&provider, sample_request()).await;
+    assert!(
+        events.iter().all(|event| event.is_ok()),
+        "the retry after the late 400 must succeed: {events:?}"
+    );
+    assert_eq!(server.request_count(), 2);
+    Ok(())
+}

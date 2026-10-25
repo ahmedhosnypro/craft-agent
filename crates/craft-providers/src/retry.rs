@@ -16,6 +16,26 @@ use crate::transport;
 /// so a hostile server cannot balloon the process.
 pub(crate) const ERROR_BODY_CAP_BYTES: usize = 64 * 1024;
 
+/// In-flight time above which a client-error rejection is a stalled
+/// upstream artifact, not a malformed payload: real rejections return
+/// in seconds.
+const LATE_CLIENT_ERROR_INFLIGHT: Duration = Duration::from_secs(120);
+
+/// A client error that arrives only after a long in-flight stall rides
+/// the patience window like a transient; a genuine rejection would have
+/// come back quickly.
+pub(crate) fn reclassify_late_client_error(
+    failure: ProviderError,
+    in_flight: Duration,
+) -> ProviderError {
+    match failure {
+        ProviderError::InvalidRequest { detail } if in_flight >= LATE_CLIENT_ERROR_INFLIGHT => {
+            ProviderError::Transient { detail }
+        }
+        other => other,
+    }
+}
+
 /// One request on the shared ladder: auth and client errors fail fast,
 /// a 429 streak surfaces with the live Retry-After, and transient,
 /// transport, or timeout failures back off — all bounded by the shared
@@ -38,11 +58,13 @@ where
     let mut round = 0usize;
     loop {
         round += 1;
+        let round_started = tokio::time::Instant::now();
         let failure = match build(client).send().await {
             Ok(response) if response.status().is_success() => return Ok(response),
             Ok(response) => http_failure(response).await,
             Err(err) => transport::classify(err),
         };
+        let failure = reclassify_late_client_error(failure, round_started.elapsed());
         let wait = match &failure {
             ProviderError::RateLimit { retry_after } => {
                 rate_streak += 1;

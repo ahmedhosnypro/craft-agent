@@ -43,7 +43,7 @@ const PROPS: &[Prop] = &[
 ];
 
 /// Ids accepted per poll.
-const IDS_CAP: usize = 32;
+const IDS_CAP: usize = 128;
 /// The longest bounded wait one poll may hold.
 const WAIT_CEILING: u64 = 3_600;
 /// The sleep between wait ticks, so a wait never spins.

@@ -155,7 +155,7 @@ fn zero_and_negative_and_huge_limits_are_typed() {
     for bad in [
         "max-steps: 0",
         "max-total-turns: -4",
-        "max-total-tokens: 999999999",
+        "max-total-tokens: 1000000001",
         "max-concurrent-steps: x",
     ] {
         let text = format!(
