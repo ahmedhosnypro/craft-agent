@@ -3,8 +3,9 @@
 use std::time::Duration;
 
 /// Retry ladder shared by every adapter: at most 6 attempts, exponential
-/// backoff starting at 2s and capped at 30s; a Retry-After header
-/// overrides the ladder; 5 consecutive 429s surface as RateLimit.
+/// backoff starting at 2s and capped at 30s; a Retry-After header above
+/// zero overrides the ladder while zero or absent grows it; 5 consecutive
+/// 429s surface as RateLimit.
 pub const RETRY_MAX_ATTEMPTS: usize = 6;
 pub const RETRY_BACKOFF_INITIAL_SECS: u64 = 2;
 pub const RETRY_BACKOFF_CAP_SECS: u64 = 30;
@@ -119,4 +120,19 @@ impl From<reqwest::Error> for ProviderError {
 pub fn parse_retry_after(value: &str) -> Option<Duration> {
     let seconds = value.trim().parse::<u64>().ok()?;
     Some(Duration::from_secs(seconds))
+}
+
+/// The wait before one rate-limited retry: a live Retry-After above zero
+/// clamped to `ceiling`; a zero or absent header falls back to the
+/// caller's ladder step, so the client never retries immediately into
+/// the same exhausted quota.
+pub fn rate_limit_wait(
+    retry_after: Option<Duration>,
+    ladder: Duration,
+    ceiling: Duration,
+) -> Duration {
+    match retry_after {
+        Some(after) if !after.is_zero() => after.min(ceiling),
+        _ => ladder,
+    }
 }

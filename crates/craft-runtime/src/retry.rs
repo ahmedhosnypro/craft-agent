@@ -11,7 +11,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use craft_core::error::ProviderError;
+use craft_core::error::{ProviderError, rate_limit_wait};
 use craft_core::types::StopReason;
 
 /// The env knob bounding total attempts per model step.
@@ -64,8 +64,8 @@ fn invalid(raw: &str) -> ProviderError {
 pub(crate) type Replay = Option<(&'static str, Duration)>;
 
 /// Step-retryability of a mid-stream death, encoded once for every
-/// taxonomy row: the stream classes replay, the deterministic classes
-/// fail the run.
+/// taxonomy row: the stream classes replay, a rate limit replays at most
+/// once with a bounded wait, and the deterministic classes fail the run.
 pub(crate) fn stream_replay(err: &ProviderError, attempt: u32) -> Replay {
     let backoff = jittered(ladder(attempt));
     let replay = match err {
@@ -74,10 +74,17 @@ pub(crate) fn stream_replay(err: &ProviderError, attempt: u32) -> Replay {
         ProviderError::Timeout { .. } => ("timeout", backoff),
         ProviderError::IdleTimeout => ("idle_timeout", backoff),
         ProviderError::StreamClosed => ("stream_closed", backoff),
-        ProviderError::RateLimit { retry_after } => (
-            "rate_limit",
-            retry_after.map_or_else(|| jittered(ladder(attempt)), |after| after.min(BACKOFF_CAP)),
-        ),
+        ProviderError::RateLimit { retry_after } => {
+            // An upstream 429 replays at most once: a step retry must
+            // not re-dispatch a whole fan-out into an exhausted quota.
+            if attempt > 1 {
+                return None;
+            }
+            (
+                "rate_limit",
+                rate_limit_wait(*retry_after, backoff, BACKOFF_CAP),
+            )
+        }
         ProviderError::Auth { .. }
         | ProviderError::InvalidRequest { .. }
         | ProviderError::ContextWindow { .. }
@@ -196,7 +203,7 @@ mod tests {
             },
             1,
         )
-        .expect("rate limits replay");
+        .expect("the first rate limit replays");
         assert_eq!(wait, Duration::from_secs(10));
         let (_, wait) = stream_replay(
             &ProviderError::RateLimit {
@@ -204,27 +211,39 @@ mod tests {
             },
             1,
         )
-        .expect("rate limits replay");
+        .expect("the first rate limit replays");
         assert_eq!(wait, BACKOFF_CAP);
-        let (_, wait) = stream_replay(&ProviderError::RateLimit { retry_after: None }, 1)
-            .expect("rate limits replay");
-        assert!(within(wait, 500));
     }
 
     #[test]
-    fn rate_limit_without_a_header_rides_the_local_ladder_per_attempt() {
-        for attempt in 1..=9u32 {
-            let Some((reason, wait)) =
-                stream_replay(&ProviderError::RateLimit { retry_after: None }, attempt)
-            else {
-                panic!("attempt {attempt}: headerless rate limit replays");
+    fn rate_limit_replays_at_most_once_per_step() {
+        for retry_after in [None, Some(Duration::ZERO), Some(Duration::from_secs(5))] {
+            let err = ProviderError::RateLimit { retry_after };
+            assert!(
+                stream_replay(&err, 1).is_some(),
+                "the first 429 replays once: {err:?}"
+            );
+            for attempt in 2..=9u32 {
+                assert!(
+                    stream_replay(&err, attempt).is_none(),
+                    "attempt {attempt} must fail the run instead of re-dispatching: {err:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn zero_or_absent_retry_after_never_waits_zero() {
+        for retry_after in [None, Some(Duration::ZERO)] {
+            let err = ProviderError::RateLimit { retry_after };
+            let Some((reason, wait)) = stream_replay(&err, 1) else {
+                panic!("the first rate limit replays: {err:?}");
             };
             assert_eq!(reason, "rate_limit");
-            let base_ms = 500u64
-                .checked_shl(attempt.saturating_sub(1))
-                .unwrap_or(u64::MAX)
-                .min(BACKOFF_CAP.as_millis() as u64);
-            assert!(within(wait, base_ms), "attempt {attempt}: {wait:?}");
+            assert!(
+                wait > Duration::ZERO && within(wait, 500),
+                "a zero/absent header rides the jittered ladder, not an immediate retry: {wait:?}"
+            );
         }
     }
 

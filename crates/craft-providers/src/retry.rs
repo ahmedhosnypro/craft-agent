@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use craft_core::error::{
     ProviderError, RATE_LIMIT_STREAK, RETRY_BACKOFF_CAP_SECS, RETRY_BACKOFF_INITIAL_SECS,
-    RETRY_MAX_ATTEMPTS,
+    RETRY_MAX_ATTEMPTS, rate_limit_wait,
 };
 
 use crate::transport;
@@ -72,7 +72,7 @@ where
                     return Err(failure);
                 }
                 let ceiling = Duration::from_secs(RETRY_BACKOFF_CAP_SECS);
-                Some(retry_after.map_or(backoff, |after| after.min(ceiling)))
+                Some(rate_limit_wait(*retry_after, backoff, ceiling))
             }
             ProviderError::Transient { .. }
             | ProviderError::Transport { .. }

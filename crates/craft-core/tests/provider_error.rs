@@ -1,7 +1,7 @@
 //! Provider error taxonomy: closed set of failure kinds, HTTP status
 //! mapping, and the Retry-After header parse used by adapters.
 
-use craft_core::error::{ProviderError, parse_retry_after};
+use craft_core::error::{ProviderError, parse_retry_after, rate_limit_wait};
 use std::time::Duration;
 
 fn status(code: u16) -> reqwest::StatusCode {
@@ -117,6 +117,32 @@ fn retry_after_rejects_hostile_values_without_panicking() {
     assert_eq!(parse_retry_after("-1"), None);
     assert_eq!(parse_retry_after("99999999999999999999999"), None);
     assert_eq!(parse_retry_after("Wed, 21 Oct 2026 07:28:00 GMT"), None);
+}
+
+#[test]
+fn rate_limit_wait_honors_a_real_header_clamped_to_the_ceiling() {
+    let ladder = Duration::from_secs(2);
+    let ceiling = Duration::from_secs(30);
+    assert_eq!(
+        rate_limit_wait(Some(Duration::from_secs(5)), ladder, ceiling),
+        Duration::from_secs(5)
+    );
+    assert_eq!(
+        rate_limit_wait(Some(Duration::from_secs(9999)), ladder, ceiling),
+        ceiling
+    );
+}
+
+#[test]
+fn rate_limit_wait_grows_the_ladder_on_zero_or_absent_header() {
+    let ladder = Duration::from_secs(2);
+    let ceiling = Duration::from_secs(30);
+    assert_eq!(
+        rate_limit_wait(Some(Duration::ZERO), ladder, ceiling),
+        ladder,
+        "a zero Retry-After must never wait zero"
+    );
+    assert_eq!(rate_limit_wait(None, ladder, ceiling), ladder);
 }
 
 #[test]
