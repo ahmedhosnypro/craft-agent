@@ -11,6 +11,7 @@ use crate::{
 use craft_core::error::ProviderError;
 use craft_core::events::{FoldError, ModelEvent, TurnCaps};
 use craft_core::types::{Usage, salvage_arguments};
+use std::time::Duration;
 
 async fn serve(body: &[u8]) -> Result<MockServer, TestError> {
     let server = MockServer::start(vec![CannedResponse::sse(body)], "/v1").await?;
@@ -199,5 +200,58 @@ async fn detail_counts_larger_than_their_totals_saturate() -> Result<(), TestErr
     assert_eq!(turn.usage.output_tokens, 0, "saturating, never underflow");
     assert_eq!(turn.usage.cache_read_tokens, 9);
     assert_eq!(turn.usage.reasoning_tokens, 12);
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn zero_retry_after_grows_the_backoff_instead_of_retrying_immediately()
+-> Result<(), TestError> {
+    // A zero Retry-After is not waitable: the four waits must carry the
+    // grown ladder (2+4+8+16 = 30s), not an immediate retry.
+    let responses = (0..5)
+        .map(|_| CannedResponse::json(429, wire::RATE_BODY).with_header("retry-after", "0"))
+        .collect();
+    let server = MockServer::start(responses, "/v1").await?;
+    let started = tokio::time::Instant::now();
+    let events = run(&provider(&server.base_url)?, sample_request()).await;
+    let err = surfaced(&events)?;
+    assert_eq!(
+        err,
+        ProviderError::RateLimit {
+            retry_after: Some(Duration::ZERO),
+        },
+        "the surfaced error carries the zero header as-is"
+    );
+    assert_eq!(server.request_count(), 5);
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= Duration::from_secs(30),
+        "elapsed {elapsed:?} must carry the grown backoff, not zero waits"
+    );
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn real_retry_after_overrides_the_ladder() -> Result<(), TestError> {
+    // Five seconds per wait: four waits = 20s, under the 30s the ladder
+    // alone would take — the live header wins over the local backoff.
+    let responses = (0..5)
+        .map(|_| CannedResponse::json(429, wire::RATE_BODY).with_header("retry-after", "5"))
+        .collect();
+    let server = MockServer::start(responses, "/v1").await?;
+    let started = tokio::time::Instant::now();
+    let events = run(&provider(&server.base_url)?, sample_request()).await;
+    let err = surfaced(&events)?;
+    assert_eq!(
+        err,
+        ProviderError::RateLimit {
+            retry_after: Some(Duration::from_secs(5)),
+        }
+    );
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= Duration::from_secs(20) && elapsed < Duration::from_secs(30),
+        "elapsed {elapsed:?} must follow the header, not the ladder"
+    );
     Ok(())
 }
