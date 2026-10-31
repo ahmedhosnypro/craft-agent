@@ -44,6 +44,9 @@ pub struct DigestOptions {
     pub max_turns: u32,
     pub max_total_tokens: u64,
     pub idle_timeout: Option<Duration>,
+    /// Context knobs resolved at the CLI/env layer; folded into the
+    /// turn's run config.
+    pub context: craft_runtime::ContextKnobs,
 }
 
 /// The terminal record: the written digest (None on dry-run), the window,
@@ -128,6 +131,7 @@ async fn assemble<P: Provider + Send + Sync>(
         max_turns: ctx.options.max_turns,
         max_total_tokens: Some(ctx.options.max_total_tokens),
         idle_timeout: ctx.options.idle_timeout,
+        context: ctx.options.context.clone(),
     };
     let report: TurnReport = run_turn(provider, &turn_config, &prompt, bundle).await?;
     let digest_path = if ctx.options.dry_run {

@@ -148,6 +148,7 @@ pub(crate) fn prepare_member(
         max_turns: request.max_turns,
         max_total_tokens: request.slice,
         per_request_tokens: settings.per_request_tokens,
+        context: settings.context.clone(),
         limits: settings.limits,
         session_path,
         idle_timeout: settings.idle_timeout,

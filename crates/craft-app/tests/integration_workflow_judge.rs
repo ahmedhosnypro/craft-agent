@@ -168,6 +168,7 @@ async fn a_seat_repairs_until_the_verdict_parses_over_the_live_gateway() -> Resu
         None,
         None::<u32>,
         agents,
+        craft_runtime::ContextKnobs::default(),
     );
     // Two forced malformed attempts: the seat must repair past both.
     let forcing = ForcingExecutor {

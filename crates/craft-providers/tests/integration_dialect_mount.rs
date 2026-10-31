@@ -65,6 +65,7 @@ async fn integration_dialect_mount() -> Result<(), TestError> {
         tool_choice: None,
         sampling: None,
         thinking: None,
+        thinking_level: None,
     };
     let err = tokio::time::timeout(LIVE_BOUND, surface_error(&provider, request))
         .await

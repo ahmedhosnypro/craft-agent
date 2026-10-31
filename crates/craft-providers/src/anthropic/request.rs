@@ -7,7 +7,7 @@
 use craft_core::error::ProviderError;
 use craft_core::types::{
     ChatMessage, ImagePart, ModelRequest, NativeBlocks, NativeDialect, Sampling, ToolCall,
-    ToolChoice,
+    ToolChoice, thinking_level_disabled,
 };
 use serde_json::Value;
 
@@ -78,8 +78,30 @@ pub(super) fn encode(request: &ModelRequest, model: &str) -> Result<Value, Provi
     if let Some(sampling) = &request.sampling {
         encode_sampling(&mut body, sampling)?;
     }
+    if let Some(level) = &request.thinking_level {
+        encode_thinking_level(&mut body, level)?;
+    }
     caching::apply(&mut body);
     Ok(body)
+}
+
+/// The thinking level on the wire: `none`/`off` disables thinking,
+/// anything else rides as the output effort verbatim (known levels
+/// low/medium/high/xhigh/max and arbitrary strings alike).
+fn encode_thinking_level(body: &mut Value, level: &str) -> Result<(), ProviderError> {
+    let map = object_mut(body)?;
+    if thinking_level_disabled(level) {
+        map.insert(
+            String::from("thinking"),
+            serde_json::json!({"type": "disabled"}),
+        );
+    } else {
+        map.insert(
+            String::from("output_config"),
+            serde_json::json!({"effort": level}),
+        );
+    }
+    Ok(())
 }
 
 /// One assistant turn: replayed native blocks stand verbatim ahead of

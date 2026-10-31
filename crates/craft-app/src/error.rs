@@ -110,6 +110,8 @@ pub enum AppError {
     WorkflowReportJson { source: serde_json::Error },
     #[error("subagent cap knob invalid: {detail}")]
     SubagentCap { detail: String },
+    #[error("context knob invalid: {detail}")]
+    ContextKnob { detail: String },
     #[error("the agent catalog failed to load: {source}")]
     AgentCatalog {
         source: craft_core::agents::AgentFileError,

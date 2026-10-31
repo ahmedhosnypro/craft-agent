@@ -131,6 +131,7 @@ fn executor(
         None,
         Some(3),
         agents,
+        craft_runtime::ContextKnobs::default(),
     ))
 }
 

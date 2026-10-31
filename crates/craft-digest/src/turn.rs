@@ -36,6 +36,7 @@ pub struct TurnConfig {
     pub max_turns: u32,
     pub max_total_tokens: Option<u64>,
     pub idle_timeout: Option<Duration>,
+    pub context: craft_runtime::ContextKnobs,
 }
 
 /// What a completed turn reports back to the pipeline.
@@ -58,6 +59,13 @@ pub async fn run_turn<P: Provider + Send + Sync>(
     run_config.max_turns = config.max_turns;
     run_config.max_total_tokens = config.max_total_tokens;
     run_config.idle_timeout = config.idle_timeout;
+    config
+        .context
+        .apply(&mut run_config)
+        .map_err(|detail| DigestError::Turn {
+            category: String::from("config"),
+            detail,
+        })?;
     let runner = Runner::new(provider, registry, run_config);
     let mut final_text = String::new();
     let outcome = runner

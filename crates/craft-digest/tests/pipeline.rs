@@ -219,6 +219,7 @@ fn options(fixture: &Fixture, dry_run: bool) -> DigestOptions {
         max_turns: 40,
         max_total_tokens: 4_000_000,
         idle_timeout: None,
+        context: craft_runtime::ContextKnobs::default(),
     }
 }
 

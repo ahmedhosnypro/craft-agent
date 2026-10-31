@@ -38,8 +38,10 @@ pub(crate) mod spawn_args;
 
 mod budget;
 mod call;
+pub mod compact;
 mod finish;
 mod guard;
+pub mod limits;
 mod prepare;
 mod request;
 mod step;
@@ -53,6 +55,10 @@ pub use craft_core::subagent::SUBAGENT_OVERLAY;
 pub use detached::{DETACHED_DRAIN, drain_detached};
 pub use envelope::ChildReport;
 pub use events::{CancelCategory, RuntimeEvent, ToolStreamName, redact_event};
+pub use limits::{
+    ContextKnobs, ENV_MAX_CONTEXT_TOKENS, ENV_MAX_INPUT_TOKENS, ENV_MAX_OUTPUT_TOKENS,
+    ENV_THINKING_LEVEL,
+};
 pub use outcome::{ExitStatus, RunOutcome};
 pub use runner::{DEFAULT_REQUEST_TOKENS, RunConfig, Runner};
 pub use subagent::{SubagentCaps, SubagentHub, SubagentSettings, SubagentWiring};

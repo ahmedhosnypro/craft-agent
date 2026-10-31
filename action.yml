@@ -48,6 +48,22 @@ inputs:
     description: Turns of tool results kept verbatim in the assembled prompt; older results ride as size stubs. 0 disables trimming.
     required: false
     default: "0"
+  max-context-tokens:
+    description: Context window cap in tokens; enables auto-compaction when set. Empty keeps it off.
+    required: false
+    default: ""
+  max-input-tokens:
+    description: Input-side compaction trigger limit in tokens; empty falls back to the context cap.
+    required: false
+    default: ""
+  max-output-tokens:
+    description: Per-request output token cap; empty keeps the default 8192.
+    required: false
+    default: ""
+  thinking-level:
+    description: Thinking level string; none/off disables thinking, anything else passes through to the provider verbatim. Empty keeps the provider default.
+    required: false
+    default: ""
   egress-allowlist:
     description: Comma-separated hosts bash commands may talk to; empty means no egress gate.
     required: false
@@ -142,6 +158,10 @@ runs:
         CRAFT_AGENT_MAX_TOKENS: ${{ inputs.max-tokens }}
         CRAFT_AGENT_STEP_RETRIES: ${{ inputs.step-retries }}
         CRAFT_AGENT_RESULT_WINDOW_TURNS: ${{ inputs.result-window-turns }}
+        CRAFT_AGENT_MAX_CONTEXT_TOKENS: ${{ inputs.max-context-tokens }}
+        CRAFT_AGENT_MAX_INPUT_TOKENS: ${{ inputs.max-input-tokens }}
+        CRAFT_AGENT_MAX_OUTPUT_TOKENS: ${{ inputs.max-output-tokens }}
+        CRAFT_AGENT_THINKING_LEVEL: ${{ inputs.thinking-level }}
         CRAFT_AGENT_EGRESS_ALLOWLIST: ${{ inputs.egress-allowlist }}
         CRAFT_AGENT_WRITE_REPO: ${{ inputs.write-repo }}
         CRAFT_AGENT_READ_ROOTS: ${{ inputs.read-roots }}
@@ -184,6 +204,18 @@ runs:
         export CRAFT_AGENT_READ_ROOTS
         cmd=(craft-agent "$mission" --max-turns "$CRAFT_AGENT_MAX_TURNS"
           --max-tokens "$CRAFT_AGENT_MAX_TOKENS")
+        if [ -n "${CRAFT_AGENT_MAX_CONTEXT_TOKENS:-}" ]; then
+          cmd+=(--max-context-tokens "$CRAFT_AGENT_MAX_CONTEXT_TOKENS")
+        fi
+        if [ -n "${CRAFT_AGENT_MAX_INPUT_TOKENS:-}" ]; then
+          cmd+=(--max-input-tokens "$CRAFT_AGENT_MAX_INPUT_TOKENS")
+        fi
+        if [ -n "${CRAFT_AGENT_MAX_OUTPUT_TOKENS:-}" ]; then
+          cmd+=(--max-output-tokens "$CRAFT_AGENT_MAX_OUTPUT_TOKENS")
+        fi
+        if [ -n "${CRAFT_AGENT_THINKING_LEVEL:-}" ]; then
+          cmd+=(--thinking-level "$CRAFT_AGENT_THINKING_LEVEL")
+        fi
         if [ "$mission" = "run" ]; then
           cmd+=(--output-format stream-json)
         fi

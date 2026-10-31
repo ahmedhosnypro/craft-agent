@@ -145,6 +145,27 @@ pub struct ModelRequest {
     pub sampling: Option<Sampling>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking: Option<Thinking>,
+    /// Thinking level as an arbitrary string; each dialect encoder maps
+    /// it (`none`/`off` disables thinking, known levels map onto the
+    /// provider's effort/level field, anything else passes through
+    /// verbatim).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_level: Option<String>,
+}
+
+/// `none`/`off` disable thinking, case-insensitive.
+pub fn thinking_level_disabled(level: &str) -> bool {
+    let lower = level.to_ascii_lowercase();
+    lower == "none" || lower == "off"
+}
+
+/// The named levels the dialect encoders recognize; anything else is a
+/// verbatim passthrough.
+pub fn known_thinking_level(level: &str) -> bool {
+    matches!(
+        level.to_ascii_lowercase().as_str(),
+        "none" | "off" | "low" | "medium" | "high" | "xhigh" | "max"
+    )
 }
 
 /// `Arc`-shared messages serialize as the plain message array they

@@ -88,6 +88,9 @@ pub struct SubagentSettings {
     pub caps: SubagentCaps,
     pub run_token_cap: Option<u64>,
     pub per_request_tokens: u32,
+    /// CLI > env context knobs children resolve their profile
+    /// frontmatter over.
+    pub context: crate::limits::ContextKnobs,
     pub default_system_prompt: String,
     pub catalog: Arc<AgentCatalog>,
     pub limits: ToolLimits,

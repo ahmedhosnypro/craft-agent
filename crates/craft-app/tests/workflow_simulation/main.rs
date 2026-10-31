@@ -45,6 +45,7 @@ fn run_simulation(rig: &Rig) -> Result<craft_workflow::WorkflowReport, Box<dyn s
         None,
         Some(3),
         rig.agents.clone(),
+        craft_runtime::ContextKnobs::default(),
     );
     executor = executor
         .with_subagents(Some(rig.hub.clone()))

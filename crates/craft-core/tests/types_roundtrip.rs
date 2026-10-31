@@ -58,6 +58,7 @@ fn model_request_round_trips_with_every_message_role() -> Result<(), serde_json:
         tool_choice: None,
         sampling: None,
         thinking: None,
+        thinking_level: None,
     };
     let json = serde_json::to_string(&request)?;
     assert!(json.contains("\"role\":\"user\""));
@@ -91,6 +92,7 @@ fn minimal_model_request_round_trips() -> Result<(), serde_json::Error> {
         tool_choice: None,
         sampling: None,
         thinking: None,
+        thinking_level: None,
     };
     assert_eq!(round_trip(request.clone())?, request);
     Ok(())

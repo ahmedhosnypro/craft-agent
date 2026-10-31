@@ -34,6 +34,7 @@ fn minimal_request(system: &str, ask: &str) -> ModelRequest {
         tool_choice: None,
         sampling: None,
         thinking: None,
+        thinking_level: None,
     }
 }
 
@@ -103,6 +104,7 @@ async fn integration_anthropic_forced_tool_call() -> Result<(), TestError> {
         tool_choice: Some(ToolChoice::Any),
         sampling: None,
         thinking: None,
+        thinking_level: None,
     };
     let turn = tokio::time::timeout(LIVE_BOUND, live_turn(&provider, request))
         .await

@@ -47,6 +47,16 @@ pub(super) fn encode(request: &ModelRequest, model: &str) -> Result<Value, Provi
             Value::String(String::from("auto")),
         );
     }
+    if let Some(level) = &request.thinking_level {
+        // Arbitrary levels pass through verbatim; `off` maps to the
+        // documented `none` effort, which already disables thinking.
+        let effort = if level.eq_ignore_ascii_case("off") {
+            String::from("none")
+        } else {
+            level.clone()
+        };
+        object_mut(&mut body)?.insert(String::from("reasoning_effort"), Value::String(effort));
+    }
     Ok(body)
 }
 

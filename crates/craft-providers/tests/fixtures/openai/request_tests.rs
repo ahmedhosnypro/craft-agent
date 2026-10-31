@@ -170,3 +170,33 @@ async fn foreign_native_blocks_are_rejected_before_any_request() -> Result<(), T
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn thinking_level_rides_reasoning_effort_verbatim() -> Result<(), TestError> {
+    for (level, expected) in [
+        ("low", "low"),
+        ("high", "high"),
+        ("custom-string", "custom-string"),
+        ("off", "none"),
+        ("Off", "none"),
+    ] {
+        let server = serve_stream().await?;
+        let mut request = sample_request();
+        request.thinking_level = Some(String::from(level));
+        let events = run(&provider(&server.base_url)?, request).await;
+        assert!(!events.is_empty());
+        let body = captured_body(server.request(0).ok_or("a request")?.body).await?;
+        assert_eq!(body["reasoning_effort"], expected, "level {level}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn unset_thinking_level_omits_reasoning_effort() -> Result<(), TestError> {
+    let server = serve_stream().await?;
+    let events = run(&provider(&server.base_url)?, sample_request()).await;
+    assert!(!events.is_empty());
+    let body = captured_body(server.request(0).ok_or("a request")?.body).await?;
+    assert!(body.get("reasoning_effort").is_none());
+    Ok(())
+}

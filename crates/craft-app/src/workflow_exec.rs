@@ -11,8 +11,8 @@ use std::time::Duration;
 use craft_core::agents::AgentFile;
 use craft_core::provider::Provider;
 use craft_runtime::{
-    ChildKnobs, ChildRun, DEFAULT_REQUEST_TOKENS, ExitStatus, Runner, RuntimeEvent, SubagentWiring,
-    prepare_child,
+    ChildKnobs, ChildRun, ContextKnobs, DEFAULT_REQUEST_TOKENS, ExitStatus, Runner, RuntimeEvent,
+    SubagentWiring, prepare_child,
 };
 use craft_tools::ToolLimits;
 use craft_workflow::status::{StepConclusion, StepUsage};
@@ -33,6 +33,9 @@ struct StepKnobs {
     idle_timeout: Option<Duration>,
     step_attempts: Option<u32>,
     step_patience: Option<Duration>,
+    /// CLI > env context knobs; each step profile's frontmatter sits
+    /// between them and the env in precedence.
+    context: ContextKnobs,
 }
 
 /// The production `StepExecutor`: the caller injects the provider
@@ -63,6 +66,7 @@ impl<P: Provider + Send + Sync> WorkflowExecutor<P> {
         idle_timeout: Option<Duration>,
         step_attempts: Option<u32>,
         agents: BTreeMap<String, AgentFile>,
+        context: ContextKnobs,
     ) -> Self {
         Self {
             mount,
@@ -74,6 +78,7 @@ impl<P: Provider + Send + Sync> WorkflowExecutor<P> {
                 idle_timeout,
                 step_attempts,
                 step_patience: None,
+                context,
             },
             agents,
             subagents: None,
@@ -165,6 +170,7 @@ fn prepare_step_child(
             max_turns: step.max_turns,
             max_total_tokens: knobs.step_token_cap,
             per_request_tokens: DEFAULT_REQUEST_TOKENS,
+            context: knobs.context.clone(),
             limits: ToolLimits::default(),
             session_path: Some(session_path),
             idle_timeout: knobs.idle_timeout,

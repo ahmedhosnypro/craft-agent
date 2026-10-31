@@ -58,6 +58,22 @@ fn executor_over(
     token_cap: u64,
     agents: BTreeMap<String, craft_core::agents::AgentFile>,
 ) -> WorkflowExecutor<FakeProvider> {
+    executor_over_knobs(
+        rig,
+        provider,
+        token_cap,
+        agents,
+        craft_runtime::ContextKnobs::default(),
+    )
+}
+
+fn executor_over_knobs(
+    rig: &Rig,
+    provider: Arc<FakeProvider>,
+    token_cap: u64,
+    agents: BTreeMap<String, craft_core::agents::AgentFile>,
+    context: craft_runtime::ContextKnobs,
+) -> WorkflowExecutor<FakeProvider> {
     let mount: StepMount<FakeProvider> = Arc::new(move |_model| Ok(provider.clone()));
     WorkflowExecutor::new(
         mount,
@@ -68,6 +84,7 @@ fn executor_over(
         None,
         Some(3),
         agents,
+        context,
     )
     .with_step_patience(Some(Duration::ZERO))
 }
@@ -247,6 +264,7 @@ async fn step_model_wins_over_the_default_mount() {
         None,
         Some(3),
         agent_map(),
+        craft_runtime::ContextKnobs::default(),
     );
     let mut step = inputs("s1", 25);
     step.model = Some("glm-x".to_string());

@@ -189,4 +189,11 @@ impl Session {
     pub fn messages(&self) -> &[std::sync::Arc<ChatMessage>] {
         &self.messages
     }
+
+    /// Replaces the in-memory history (auto-compaction swaps the prefix
+    /// for one summary message); the append-only record on disk is
+    /// never rewritten.
+    pub(crate) fn replace_messages(&mut self, messages: Vec<std::sync::Arc<ChatMessage>>) {
+        self.messages = messages;
+    }
 }

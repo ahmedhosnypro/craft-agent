@@ -87,6 +87,7 @@ pub fn sample_request() -> ModelRequest {
         tool_choice: None,
         sampling: None,
         thinking: None,
+        thinking_level: None,
     }
 }
 
@@ -120,6 +121,7 @@ pub fn replay_request(assistant_text: &str) -> ModelRequest {
         tool_choice: None,
         sampling: None,
         thinking: None,
+        thinking_level: None,
     }
 }
 

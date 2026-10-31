@@ -49,6 +49,7 @@ fn terminal_hub(
         },
         run_token_cap: None,
         per_request_tokens: 4_096,
+        context: craft_runtime::ContextKnobs::default(),
         default_system_prompt: String::new(),
         catalog: std::sync::Arc::new(AgentCatalog {
             agents: vec![agent],
@@ -86,6 +87,7 @@ fn workflow_finished_waits_out_a_full_queue_instead_of_dropping() {
         None,
         Some(3),
         agents,
+        craft_runtime::ContextKnobs::default(),
     );
     let journal = Journal::open(&run_dir.join("journal.jsonl")).expect("journal");
     let (tx, events) = mpsc::sync_channel(EVENT_QUEUE_CAP);
