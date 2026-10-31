@@ -45,5 +45,6 @@ pub(crate) async fn build(
         tool_choice: None,
         sampling: None,
         thinking: None,
+        thinking_level: config.thinking_level.clone(),
     }
 }

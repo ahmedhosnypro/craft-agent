@@ -77,6 +77,7 @@ fn mount_run(
     run: &RunCli,
     redactor: &Arc<craft_redact::Redactor>,
     config: &crate::config::EnvConfig,
+    env: &crate::config::EnvMap,
 ) -> Result<Option<MountedRun>, AppError> {
     let prompt = read_prompt(&run.prompt)?;
     let backend = mount_backend(config)?;
@@ -95,14 +96,32 @@ fn mount_run(
             return Ok(None);
         }
     };
-    let run_config = build_run_config(run, agent.as_ref(), workspace_root.clone(), session_path);
+    let run_config = build_run_config(
+        run,
+        agent.as_ref(),
+        env,
+        workspace_root.clone(),
+        session_path,
+    )?;
     let caps = RunCaps {
         turn_cap: run_config.max_turns,
         token_budget: run_config.max_total_tokens,
     };
     let session_path = run_config.session_path.clone();
     let deadline = agent.as_ref().and_then(|agent| agent.timeout_secs);
-    let subagents = subagent_setup::mount(&run_config, &workspace_root, backend.clone())?;
+    // Spawned children resolve CLI > their own profile frontmatter > env.
+    let child_context = craft_runtime::ContextKnobs::resolve(
+        &subagent_setup::cli_knobs(
+            run.max_context_tokens,
+            run.max_input_tokens,
+            run.max_output_tokens,
+            run.thinking_level.clone(),
+        ),
+        &craft_runtime::ContextKnobs::default(),
+        &subagent_setup::env_knobs(env)?,
+    );
+    let subagents =
+        subagent_setup::mount(&run_config, child_context, &workspace_root, backend.clone())?;
     let run_registry =
         profile::build_registry(agent.as_ref(), ToolLimits::default(), subagents.clone());
     let mut run_config = run_config;
@@ -186,7 +205,7 @@ fn drive_run(
 fn execute_run_inner(run: RunCli, redactor: &Arc<craft_redact::Redactor>) -> Result<i32, AppError> {
     let env = env_from_process();
     let config = resolve_env_config(&env)?;
-    let Some(mounted) = mount_run(&run, redactor, &config)? else {
+    let Some(mounted) = mount_run(&run, redactor, &config, &env)? else {
         return Ok(1);
     };
     let (outcome, caps) = drive_run(mounted, redactor)?;

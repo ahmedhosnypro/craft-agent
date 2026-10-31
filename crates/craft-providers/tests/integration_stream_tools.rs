@@ -59,6 +59,7 @@ async fn integration_stream_tools() -> Result<(), TestError> {
         tool_choice: None,
         sampling: None,
         thinking: None,
+        thinking_level: None,
     };
     let (turn, tool_deltas) = tokio::time::timeout(LIVE_BOUND, live_assembly(&provider, request))
         .await

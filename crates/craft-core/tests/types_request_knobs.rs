@@ -50,6 +50,7 @@ fn request_without_knobs_serializes_without_knob_fields() -> Result<(), serde_js
         tool_choice: None,
         sampling: None,
         thinking: None,
+        thinking_level: None,
     };
     let json = serde_json::to_string(&request)?;
     assert_eq!(
@@ -80,11 +81,13 @@ fn request_with_knobs_round_trips() -> Result<(), serde_json::Error> {
             budget_tokens: 1024,
             include_thoughts: true,
         }),
+        thinking_level: Some(String::from("high")),
     };
     let json = serde_json::to_string(&request)?;
     assert!(json.contains("\"tool_choice\""), "got {json}");
     assert!(json.contains("\"sampling\""), "got {json}");
     assert!(json.contains("\"thinking\""), "got {json}");
+    assert!(json.contains("\"thinking_level\":\"high\""), "got {json}");
     let back: ModelRequest = serde_json::from_str(&json)?;
     assert_eq!(back, request);
     Ok(())
@@ -97,7 +100,20 @@ fn requests_without_the_knob_fields_still_deserialize() -> Result<(), serde_json
     assert_eq!(request.tool_choice, None);
     assert_eq!(request.sampling, None);
     assert_eq!(request.thinking, None);
+    assert_eq!(request.thinking_level, None);
     Ok(())
+}
+
+#[test]
+fn thinking_level_helpers_classify_levels() {
+    use craft_core::types::{known_thinking_level, thinking_level_disabled};
+    assert!(thinking_level_disabled("none"));
+    assert!(thinking_level_disabled("OFF"));
+    assert!(!thinking_level_disabled("low"));
+    for level in ["low", "medium", "high", "xhigh", "max", "None", "off"] {
+        assert!(known_thinking_level(level), "{level} is known");
+    }
+    assert!(!known_thinking_level("custom-verbosity"));
 }
 
 #[test]

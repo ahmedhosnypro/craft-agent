@@ -248,7 +248,9 @@ envelope) map onto the same taxonomy:
 ## Request encoding
 
 - **OpenAI** — the system prompt rides as a leading system message;
-  tools ride as `function` entries with `tool_choice: auto`.
+  tools ride as `function` entries with `tool_choice: auto`. A
+  thinking level rides as `reasoning_effort` verbatim (`off` normalizes
+  to `none`), and only when set.
 - **Anthropic** — top-level `system`; `max_tokens` is required and
   clamped to the family ceiling (below). Assistant turns are content
   blocks — replayed native blocks first, then `text` and `tool_use`
@@ -261,7 +263,10 @@ envelope) map onto the same taxonomy:
   JSON numbers (a non-finite value is a typed rejection),
   `stop_sequences` when non-empty; anything unset keeps the provider
   default. `tool_choice` (`auto`/`any`/`tool`) rides only with tools.
-  A final pass marks the three prompt-cache breakpoints.
+  A thinking level rides as `output_config.effort` verbatim, or as
+  `thinking: {type: disabled}` for `none`/`off` — the two wire forms
+  are mutually exclusive, so the budget form never rides alongside a
+  level. A final pass marks the three prompt-cache breakpoints.
 - **Gemini** — `systemInstruction` parts;
   `generationConfig.maxOutputTokens` (clamped to a known model's output
   cap — the registry, below); tools as `functionDeclarations`
@@ -280,6 +285,10 @@ envelope) map onto the same taxonomy:
   `generationConfig.thinkingConfig`: `thinkingBudget` always,
   `includeThoughts` only when the caller asked for surfaced thoughts;
   a known non-thinking model omits `thinkingConfig` entirely (below).
+  A thinking level overrides that shape: `none`/`off` rides
+  `thinkingBudget: 0`, a known level (`low`/`medium`/`high`/`xhigh`/
+  `max`) rides uppercased as `thinkingLevel`, and any other string
+  rides verbatim as `thinkingLevel`.
   Image attachments ride as `inlineData` parts — beside the text part
   of a user message (the text part rides only when non-empty), after
   the `functionResponse` part of a tool result; a url image has no

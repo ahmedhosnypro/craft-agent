@@ -65,6 +65,20 @@ pub struct RunCli {
     /// Total token budget; default 4000000.
     #[arg(long)]
     pub max_tokens: Option<u64>,
+    /// Context window cap in tokens; enables auto-compaction when set.
+    #[arg(long)]
+    pub max_context_tokens: Option<u64>,
+    /// Input-side compaction trigger limit in tokens; default is the
+    /// context cap.
+    #[arg(long)]
+    pub max_input_tokens: Option<u64>,
+    /// Per-request output cap in tokens; overrides the default 8192.
+    #[arg(long)]
+    pub max_output_tokens: Option<u64>,
+    /// Thinking level string; `none`/`off` disables thinking, anything
+    /// else passes through to the provider verbatim.
+    #[arg(long)]
+    pub thinking_level: Option<String>,
     /// Cancel the run after this many idle seconds; default off.
     #[arg(long)]
     pub idle_timeout_secs: Option<u64>,
@@ -97,6 +111,20 @@ pub struct DigestCli {
     /// Token budget for the digest model turn; default 4000000.
     #[arg(long)]
     pub max_tokens: Option<u64>,
+    /// Context window cap in tokens; enables auto-compaction when set.
+    #[arg(long)]
+    pub max_context_tokens: Option<u64>,
+    /// Input-side compaction trigger limit in tokens; default is the
+    /// context cap.
+    #[arg(long)]
+    pub max_input_tokens: Option<u64>,
+    /// Per-request output cap in tokens; overrides the default 8192.
+    #[arg(long)]
+    pub max_output_tokens: Option<u64>,
+    /// Thinking level string; `none`/`off` disables thinking, anything
+    /// else passes through to the provider verbatim.
+    #[arg(long)]
+    pub thinking_level: Option<String>,
     /// Cancel the digest turn after this many idle seconds; default off.
     #[arg(long)]
     pub idle_timeout_secs: Option<u64>,
@@ -122,6 +150,22 @@ pub struct WorkflowCli {
     /// Token budget per step; default is the plan's total-token limit.
     #[arg(long)]
     pub max_tokens: Option<u64>,
+    /// Context window cap in tokens per step; enables auto-compaction
+    /// when set.
+    #[arg(long)]
+    pub max_context_tokens: Option<u64>,
+    /// Input-side compaction trigger limit in tokens; default is the
+    /// context cap.
+    #[arg(long)]
+    pub max_input_tokens: Option<u64>,
+    /// Per-request output cap in tokens per step; overrides the
+    /// default 8192.
+    #[arg(long)]
+    pub max_output_tokens: Option<u64>,
+    /// Thinking level string; `none`/`off` disables thinking, anything
+    /// else passes through to the provider verbatim.
+    #[arg(long)]
+    pub thinking_level: Option<String>,
     /// Cancel a step after this many idle seconds; default off.
     #[arg(long)]
     pub idle_timeout_secs: Option<u64>,

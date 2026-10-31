@@ -5,7 +5,7 @@
 
 use crate::mock::{CannedResponse, MockServer};
 use crate::wire;
-use crate::{KEY, TestError, provider, replay_request, run, sample_request, tool_spec};
+use crate::{KEY, MODEL, TestError, provider, replay_request, run, sample_request, tool_spec};
 use craft_core::error::ProviderError;
 use craft_core::types::{ChatMessage, ModelRequest, NativeBlocks, NativeDialect};
 use craft_providers::anthropic::AnthropicProvider;
@@ -234,5 +234,44 @@ async fn foreign_native_blocks_are_rejected_before_any_request() -> Result<(), T
         "got {err:?}"
     );
     assert_eq!(server.request_count(), 0, "no request leaves the adapter");
+    Ok(())
+}
+
+#[tokio::test]
+async fn thinking_level_rides_output_config_effort_verbatim() -> Result<(), TestError> {
+    for level in ["low", "medium", "high", "xhigh", "max", "custom-string"] {
+        let mut request = sample_request();
+        request.thinking_level = Some(String::from(level));
+        let body = body_for(request, MODEL).await?;
+        assert_eq!(
+            body["output_config"],
+            serde_json::json!({"effort": level}),
+            "level {level}"
+        );
+        assert!(
+            body.get("thinking").is_none(),
+            "effort and budget are mutually exclusive on the wire"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn disabled_thinking_level_rides_the_thinking_disable() -> Result<(), TestError> {
+    for level in ["none", "off", "OFF"] {
+        let mut request = sample_request();
+        request.thinking_level = Some(String::from(level));
+        let body = body_for(request, MODEL).await?;
+        assert_eq!(body["thinking"], serde_json::json!({"type": "disabled"}));
+        assert!(body.get("output_config").is_none());
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn unset_thinking_level_omits_both_thinking_fields() -> Result<(), TestError> {
+    let body = body_for(sample_request(), MODEL).await?;
+    assert!(body.get("thinking").is_none());
+    assert!(body.get("output_config").is_none());
     Ok(())
 }

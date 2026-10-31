@@ -153,3 +153,50 @@ async fn thinking_encodes_the_thinking_config() -> Result<(), TestError> {
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn thinking_level_rides_the_thinking_config() -> Result<(), TestError> {
+    for (level, expected) in [
+        ("low", serde_json::json!({"thinkingLevel": "LOW"})),
+        ("high", serde_json::json!({"thinkingLevel": "HIGH"})),
+        (
+            "custom-string",
+            serde_json::json!({"thinkingLevel": "custom-string"}),
+        ),
+        ("none", serde_json::json!({"thinkingBudget": 0})),
+        ("off", serde_json::json!({"thinkingBudget": 0})),
+    ] {
+        let mut request = sample_request();
+        request.thinking_level = Some(String::from(level));
+        let body = body_for(request).await?;
+        assert_eq!(
+            body["generationConfig"]["thinkingConfig"], expected,
+            "level {level}"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn thinking_level_wins_over_the_thinking_struct() -> Result<(), TestError> {
+    let mut request = sample_request();
+    request.thinking = Some(Thinking {
+        budget_tokens: 2048,
+        include_thoughts: true,
+    });
+    request.thinking_level = Some(String::from("low"));
+    let body = body_for(request).await?;
+    assert_eq!(
+        body["generationConfig"]["thinkingConfig"],
+        serde_json::json!({"thinkingLevel": "LOW"}),
+        "the level replaces the budget form entirely"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn unset_thinking_level_omits_the_thinking_config() -> Result<(), TestError> {
+    let body = body_for(sample_request()).await?;
+    assert!(body["generationConfig"].get("thinkingConfig").is_none());
+    Ok(())
+}

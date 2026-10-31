@@ -39,6 +39,7 @@ fn tool_exchange(raw_call_id: &str, raw_result_id: &str) -> ModelRequest {
         tool_choice: None,
         sampling: None,
         thinking: None,
+        thinking_level: None,
     }
 }
 

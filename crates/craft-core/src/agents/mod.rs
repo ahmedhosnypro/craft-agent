@@ -29,7 +29,7 @@ pub const TOOL_IDS: [&str; 10] = [
 ];
 
 /// Frontmatter keys the format accepts; anything else is an error.
-pub(crate) const KNOWN_KEYS: [&str; 12] = [
+pub(crate) const KNOWN_KEYS: [&str; 16] = [
     "name",
     "description",
     "model",
@@ -42,6 +42,10 @@ pub(crate) const KNOWN_KEYS: [&str; 12] = [
     "timeoutSecs",
     "background",
     "agentsMd",
+    "maxContextTokens",
+    "maxInputTokens",
+    "maxOutputTokens",
+    "thinking",
 ];
 
 /// How the body combines with the default system prompt.
@@ -73,6 +77,16 @@ pub struct AgentFile {
     pub deny_write: Vec<String>,
     pub max_turns: Option<u32>,
     pub timeout_secs: Option<u64>,
+    /// Context window cap in tokens; enables auto-compaction when set.
+    pub max_context_tokens: Option<u64>,
+    /// Input-side compaction trigger limit; None falls back to the
+    /// context cap.
+    pub max_input_tokens: Option<u64>,
+    /// Per-request output cap in tokens.
+    pub max_output_tokens: Option<u64>,
+    /// Thinking level string; `none`/`off` disables thinking, anything
+    /// else passes through to the provider verbatim.
+    pub thinking: Option<String>,
     pub background: bool,
     pub agents_md: bool,
     /// The prompt body, edge whitespace trimmed.

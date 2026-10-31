@@ -11,6 +11,7 @@ use super::tools::check_tools;
 use super::{AgentFile, AgentFileError, PromptMode, file_stem};
 
 const DESC_BYTE_CAP: usize = 1024;
+const STRING_FIELD_BYTE_CAP: usize = 128;
 const BODY_LINE_LIMIT: usize = 300;
 const PLACEHOLDERS: [&str; 3] = ["todo", "tbd", "wip"];
 const TRIGGER_WORDS: [&str; 5] = ["use", "when", "run", "for", "against"];
@@ -30,6 +31,10 @@ pub(crate) fn build(parsed: &Parsed, path: &Path) -> Result<AgentFile, AgentFile
     let prompt_mode = prompt_mode(parsed, path)?;
     let max_turns = number_field(parsed, "maxTurns", path)?;
     let timeout_secs = number_field(parsed, "timeoutSecs", path)?;
+    let max_context_tokens = number_field(parsed, "maxContextTokens", path)?;
+    let max_input_tokens = number_field(parsed, "maxInputTokens", path)?;
+    let max_output_tokens = number_field(parsed, "maxOutputTokens", path)?;
+    let thinking = string_field(parsed, "thinking", path)?;
     let background = bool_field(parsed, "background", path, false)?;
     let agents_md = bool_field(parsed, "agentsMd", path, true)?;
     let body = check_body(parsed, path)?;
@@ -45,6 +50,10 @@ pub(crate) fn build(parsed: &Parsed, path: &Path) -> Result<AgentFile, AgentFile
         deny_write,
         max_turns,
         timeout_secs,
+        max_context_tokens,
+        max_input_tokens,
+        max_output_tokens,
+        thinking,
         background,
         agents_md,
         body,
@@ -199,6 +208,24 @@ where
         Ok(value) if value > T::default() => Ok(Some(value)),
         _ => Err(invalid()),
     }
+}
+
+/// FIELD01: a non-empty bounded string; absent means None.
+fn string_field(parsed: &Parsed, key: &str, path: &Path) -> Result<Option<String>, AgentFileError> {
+    let Some(found) = entry(parsed, key) else {
+        return Ok(None);
+    };
+    let value = found.value.trim();
+    if value.is_empty() || value.len() > STRING_FIELD_BYTE_CAP {
+        return Err(AgentFileError::ValueShape {
+            path: path.to_path_buf(),
+            line: found.line,
+            message: format!(
+                "{key} must be a non-empty string of at most {STRING_FIELD_BYTE_CAP} bytes"
+            ),
+        });
+    }
+    Ok(Some(value.to_string()))
 }
 
 /// FIELD01: `extend` or `full`; absent means extend.

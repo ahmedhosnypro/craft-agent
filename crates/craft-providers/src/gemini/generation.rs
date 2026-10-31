@@ -4,7 +4,9 @@
 //! honor.
 
 use craft_core::error::ProviderError;
-use craft_core::types::{ModelRequest, Sampling, Thinking};
+use craft_core::types::{
+    ModelRequest, Sampling, Thinking, known_thinking_level, thinking_level_disabled,
+};
 use serde_json::{Map, Value};
 
 use super::registry::ModelInfo;
@@ -28,12 +30,27 @@ pub(super) fn config(
     if let Some(sampling) = &request.sampling {
         sampling_fields(&mut config, sampling)?;
     }
-    if let Some(thinking) = &request.thinking
-        && known.is_none_or(|info| info.thinking)
-    {
-        config.insert(String::from("thinkingConfig"), thinking_config(thinking));
+    if known.is_none_or(|info| info.thinking) {
+        if let Some(level) = &request.thinking_level {
+            config.insert(String::from("thinkingConfig"), thinking_level_config(level));
+        } else if let Some(thinking) = &request.thinking {
+            config.insert(String::from("thinkingConfig"), thinking_config(thinking));
+        }
     }
     Ok(Value::Object(config))
+}
+
+/// The thinking level on the wire: `none`/`off` disables thinking via a
+/// zero budget, a known level rides uppercased as thinkingLevel, and
+/// anything else passes through verbatim.
+fn thinking_level_config(level: &str) -> Value {
+    if thinking_level_disabled(level) {
+        return serde_json::json!({"thinkingBudget": 0});
+    }
+    if known_thinking_level(level) {
+        return serde_json::json!({"thinkingLevel": level.to_ascii_uppercase()});
+    }
+    serde_json::json!({"thinkingLevel": level})
 }
 /// Finite temperature and topP as JSON numbers, stopSequences only when
 /// set; anything unset keeps the provider default.

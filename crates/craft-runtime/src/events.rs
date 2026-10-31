@@ -9,6 +9,7 @@
 //! {"type":"tool_progress","turn":1,"name":"bash","stream":"stdout","text":"..."}
 //! {"type":"tool_result","turn":1,"call_id":"c1","name":"read_file","is_error":false,"content":"..."}
 //! {"type":"turn_usage","turn":1,"usage":{...Usage...}}
+//! {"type":"compacted","turn":1,"attempt":1,"kept_messages":4,"summary_bytes":812}
 //! {"type":"run_finished","exit_code":0,"category":"completed","detail":"...","usage":{...},"turns":2}
 //! ```
 //!
@@ -85,6 +86,15 @@ pub enum RuntimeEvent {
     TurnUsage {
         turn: u32,
         usage: Usage,
+    },
+    /// The run compacted its history: the prefix became one summary
+    /// message and the last `kept_messages` entries stayed verbatim.
+    /// `attempt` is the 1-based compaction attempt count for the run.
+    Compacted {
+        turn: u32,
+        attempt: u32,
+        kept_messages: usize,
+        summary_bytes: usize,
     },
     RunFinished {
         exit_code: i32,

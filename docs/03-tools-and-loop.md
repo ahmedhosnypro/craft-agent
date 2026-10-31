@@ -176,7 +176,11 @@ pass through in order.
 `Runner` drives one turn at a time to a terminal outcome. Knobs
 (`RunConfig`): a system prompt, the turn cap (default 40), the total
 token budget (default 4 000 000), the per-request output cap forwarded
-to the provider (default 8192), turn caps for the fold, an optional
+to the provider (default 8192), the context window cap
+(`max_context_tokens`, unset disables auto-compaction), the input-side
+compaction limit (`max_input_tokens`, unset falls back to the context
+cap), the thinking level string (`thinking_level`, unset keeps the
+provider default), turn caps for the fold, an optional
 idle timeout over a stalled stream, the step-attempt bound (default 3,
 env `CRAFT_AGENT_STEP_RETRIES`), the result-window turn count (default
 0 — trimming off; a nonzero window trades gateway cache affinity for
@@ -186,7 +190,25 @@ per-result truncation cap (default 4096 bytes, env
 as head plus a spill pointer under RUNNER_TEMP), the workspace root,
 and the session path. The tool layer reads `CRAFT_AGENT_READ_ROOTS`
 from the environment once at startup: extra read-only roots for the
-file-read tools. Each turn:
+file-read tools. The four context knobs resolve CLI flag over agent-file
+frontmatter (`maxContextTokens`, `maxInputTokens`, `maxOutputTokens`,
+`thinking`) over environment (`CRAFT_AGENT_MAX_CONTEXT_TOKENS`,
+`CRAFT_AGENT_MAX_INPUT_TOKENS`, `CRAFT_AGENT_MAX_OUTPUT_TOKENS`,
+`CRAFT_AGENT_THINKING_LEVEL`) over the default; a garbage, zero, or
+oversized value is a typed error naming the knob, and an output cap
+above the provider's `max_tokens` field fails the same way.
+
+Before each model call, when a context cap is set, the runner
+estimates the used context — the provider's last-turn input report
+when it is positive, else a chars/4 walk over the session — and past
+the trigger (used at 85% of the effective input limit, or used plus a
+50 000-token reserve at the context cap) it asks the model for one
+summary of the history so far (output capped at min(max_output,
+131072) tokens), replaces the history prefix with that summary
+message, and keeps the last 4 messages verbatim. A `compacted` event
+marks the swap. Compaction is fail-soft: a failed summary call counts
+one attempt and the run continues, and past 3 attempts compaction
+stops for the rest of the run. Each turn:
 
 1. The runner builds the next request from the full session record
    plus the registry's cached tool specs, and streams it through the
@@ -272,6 +294,7 @@ per line, tagged by `type`:
 | `tool_progress` | `turn`, `name`, `stream` (`stdout` or `stderr`), `text` |
 | `tool_result` | `turn`, `call_id`, `name`, `is_error`, `content` |
 | `turn_usage` | `turn`, `usage` |
+| `compacted` | `turn`, `attempt`, `kept_messages`, `summary_bytes` |
 | `run_finished` | `exit_code`, `category`, `detail`, `usage`, `turns` |
 
 `run_finished` is always the last line; its `exit_code` doubles as the

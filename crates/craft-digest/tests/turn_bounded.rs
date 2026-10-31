@@ -133,6 +133,7 @@ fn options(root: &Path, max_turns: u32) -> DigestOptions {
         max_turns,
         max_total_tokens: 4_000_000,
         idle_timeout: None,
+        context: craft_runtime::ContextKnobs::default(),
     }
 }
 

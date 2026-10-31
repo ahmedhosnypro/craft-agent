@@ -21,6 +21,10 @@ the live-integration workflow are the two shipped consumers.
 | `github-token` | `github.token` | Exported as `GH_TOKEN` for the agent's gh tool. Also installed as the runner-wide git credential helper unless `write-repo` is set — when the write gate is declared, the helper is skipped so a plain `git push` cannot go around it. |
 | `step-retries` | `3` | Total attempts per model step when the gateway drops a stream mid-turn; `0` restores fail-fast. |
 | `result-window-turns` | `0` | Turns of tool results kept verbatim in the assembled prompt; older results ride as size stubs. `0` (default) disables trimming, preserving gateway cache affinity. |
+| `max-context-tokens` | empty | Context window cap in tokens; enables auto-compaction when set. Empty keeps it off. Forwarded as `CRAFT_AGENT_MAX_CONTEXT_TOKENS` and as `--max-context-tokens` when non-empty. |
+| `max-input-tokens` | empty | Input-side compaction trigger limit in tokens; empty falls back to the context cap. Forwarded as `CRAFT_AGENT_MAX_INPUT_TOKENS` and as `--max-input-tokens` when non-empty. |
+| `max-output-tokens` | empty | Per-request output token cap; empty keeps the default 8192. Forwarded as `CRAFT_AGENT_MAX_OUTPUT_TOKENS` and as `--max-output-tokens` when non-empty. |
+| `thinking-level` | empty | Thinking level string; `none`/`off` disables thinking, anything else passes through to the provider verbatim. Empty keeps the provider default. Forwarded as `CRAFT_AGENT_THINKING_LEVEL` and as `--thinking-level` when non-empty. |
 | `egress-allowlist` | empty | Comma-separated hosts bash commands may talk to; empty means no egress gate. |
 | `write-repo` | empty | `owner/name` the gh tool's write verbs must target; empty means no write gate. Setting it also skips `gh auth setup-git`, since the credential helper would bypass the gate for plain git. |
 | `read-roots` | empty | Extra read-only roots for `read_file`/`glob`/`grep`, comma separated, absolute paths; empty defaults to the runner temp directory, `off` disables the feature. |

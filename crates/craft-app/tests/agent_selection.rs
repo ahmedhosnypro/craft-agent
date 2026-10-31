@@ -49,6 +49,10 @@ fn profile(name: &str, tools: Option<Vec<&str>>, deny: &[&str], mode: PromptMode
         deny_write: Vec::new(),
         max_turns: None,
         timeout_secs: None,
+        max_context_tokens: None,
+        max_input_tokens: None,
+        max_output_tokens: None,
+        thinking: None,
         background: false,
         agents_md: true,
         body: "The body.".to_string(),
@@ -231,7 +235,14 @@ fn system_prompt_full_replaces_and_extend_prepends() {
 fn the_parent_turn_cap_wins_when_both_are_set() {
     let agent = profile("probe", None, &[], PromptMode::Full);
     let parent = run_cli(&["--max-turns", "50"]).unwrap();
-    let config = build_run_config(&parent, Some(&agent), PathBuf::from("/w"), PathBuf::new());
+    let config = build_run_config(
+        &parent,
+        Some(&agent),
+        &std::collections::HashMap::new(),
+        PathBuf::from("/w"),
+        PathBuf::new(),
+    )
+    .unwrap();
     assert_eq!(config.max_turns, 50);
 }
 
@@ -239,7 +250,14 @@ fn the_parent_turn_cap_wins_when_both_are_set() {
 fn the_agent_turn_cap_applies_when_the_parent_sets_none() {
     let agent = profile("probe", None, &[], PromptMode::Full);
     let run = run_cli(&[]).unwrap();
-    let config = build_run_config(&run, Some(&agent), PathBuf::from("/w"), PathBuf::new());
+    let config = build_run_config(
+        &run,
+        Some(&agent),
+        &std::collections::HashMap::new(),
+        PathBuf::from("/w"),
+        PathBuf::new(),
+    )
+    .unwrap();
     assert_eq!(config.max_turns, 40);
 }
 
@@ -250,7 +268,14 @@ fn an_agent_turn_cap_lower_than_the_default_applies() {
         ..profile("probe", None, &[], PromptMode::Full)
     };
     let run = run_cli(&[]).unwrap();
-    let config = build_run_config(&run, Some(&agent), PathBuf::from("/w"), PathBuf::new());
+    let config = build_run_config(
+        &run,
+        Some(&agent),
+        &std::collections::HashMap::new(),
+        PathBuf::from("/w"),
+        PathBuf::new(),
+    )
+    .unwrap();
     assert_eq!(config.max_turns, 15);
 }
 

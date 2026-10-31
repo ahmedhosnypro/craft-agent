@@ -72,6 +72,15 @@ pub fn write_plain_event(out: &mut dyn Write, event: &RuntimeEvent) -> io::Resul
         } => writeln!(out, "[{name} {stream:?}] {text}"),
         RuntimeEvent::ToolResult { .. } => write_tool_result(out, event),
         RuntimeEvent::TurnUsage { .. } => write_turn_usage(out, event),
+        RuntimeEvent::Compacted {
+            turn,
+            attempt,
+            kept_messages,
+            summary_bytes,
+        } => writeln!(
+            out,
+            "[compact turn {turn}] attempt {attempt}: history prefix summarized ({summary_bytes} bytes), last {kept_messages} messages kept"
+        ),
         RuntimeEvent::RunFinished { .. } => write_run_finished(out, event),
         RuntimeEvent::WorkflowStarted { .. } => write_workflow_started(out, event),
         RuntimeEvent::WorkflowFinished { exit_code, report } => {

@@ -52,6 +52,10 @@ KNOWN_FIELDS=(
   timeoutSecs
   background
   agentsMd
+  maxContextTokens
+  maxInputTokens
+  maxOutputTokens
+  thinking
 )
 TOOLS_FIELDS=(tools disallowedTools)
 GLOBS_FIELDS=(denyRead denyWrite)

@@ -125,6 +125,20 @@ fn digest_options(
         max_turns: digest.max_turns.unwrap_or(40),
         max_tokens: digest.max_tokens.unwrap_or(4_000_000),
     };
+    let env = env_from_process();
+    let context = craft_runtime::ContextKnobs::resolve(
+        &crate::subagent_setup::cli_knobs(
+            digest.max_context_tokens,
+            digest.max_input_tokens,
+            digest.max_output_tokens,
+            digest.thinking_level.clone(),
+        ),
+        &craft_runtime::ContextKnobs::default(),
+        &crate::subagent_setup::env_knobs(&env)?,
+    );
+    context
+        .validate()
+        .map_err(|detail| AppError::ContextKnob { detail })?;
     let options = DigestOptions {
         org: org.to_string(),
         repos: repos.to_vec(),
@@ -135,6 +149,7 @@ fn digest_options(
         max_turns: caps.max_turns,
         max_total_tokens: caps.max_tokens,
         idle_timeout: digest.idle_timeout_secs.map(Duration::from_secs),
+        context,
     };
     Ok((options, caps))
 }

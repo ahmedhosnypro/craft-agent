@@ -34,6 +34,9 @@ pub struct ChildKnobs {
     pub max_turns: u32,
     pub max_total_tokens: Option<u64>,
     pub per_request_tokens: u32,
+    /// CLI > env context knobs; the child profile's frontmatter sits
+    /// between them and the env in precedence.
+    pub context: crate::limits::ContextKnobs,
     pub limits: ToolLimits,
     pub session_path: Option<PathBuf>,
     pub idle_timeout: Option<Duration>,
@@ -77,6 +80,12 @@ pub fn prepare_child(
     config.max_turns = knobs.max_turns;
     config.max_total_tokens = knobs.max_total_tokens;
     config.max_tokens = knobs.per_request_tokens;
+    crate::limits::ContextKnobs::resolve(
+        &knobs.context,
+        &crate::limits::ContextKnobs::from_agent(Some(profile)),
+        &crate::limits::ContextKnobs::default(),
+    )
+    .apply(&mut config)?;
     config.idle_timeout = knobs.idle_timeout;
     config.step_attempts = knobs.step_attempts;
     config.step_patience = knobs.step_patience;

@@ -40,6 +40,7 @@ fn weather_request(
         tool_choice: None,
         sampling: None,
         thinking: None,
+        thinking_level: None,
     }
 }
 
